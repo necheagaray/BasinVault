@@ -1,0 +1,10 @@
+{
+  "name": "basin-treasury-vault",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Basin Engineering treasury / 5-week cash flow forecast vault",
+  "dependencies": {
+    "@netlify/blobs": "latest"
+  }
+}

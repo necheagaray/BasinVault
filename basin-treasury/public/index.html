@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Basin Treasury Vault</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2040%2040%22%3E%0A%3Ccircle%20cx%3D%2220%22%20cy%3D%2220%22%20r%3D%2219%22%20fill%3D%22%230a1119%22/%3E%0A%3Ccircle%20cx%3D%2220%22%20cy%3D%2220%22%20r%3D%2217%22%20fill%3D%22none%22%20stroke%3D%22%23c8a35a%22%20stroke-width%3D%222%22/%3E%0A%3Ccircle%20cx%3D%2235.5%22%20cy%3D%2220.0%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%3Ccircle%20cx%3D%2231.0%22%20cy%3D%2231.0%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%3Ccircle%20cx%3D%2220.0%22%20cy%3D%2235.5%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%3Ccircle%20cx%3D%229.0%22%20cy%3D%2231.0%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%3Ccircle%20cx%3D%224.5%22%20cy%3D%2220.0%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%3Ccircle%20cx%3D%229.0%22%20cy%3D%229.0%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%3Ccircle%20cx%3D%2220.0%22%20cy%3D%224.5%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%3Ccircle%20cx%3D%2231.0%22%20cy%3D%229.0%22%20r%3D%221.4%22%20fill%3D%22%23c8a35a%22/%3E%0A%3Ccircle%20cx%3D%2220%22%20cy%3D%2220%22%20r%3D%2212%22%20fill%3D%22none%22%20stroke%3D%22%2333495f%22%20stroke-width%3D%221%22/%3E%0A%3Cline%20x1%3D%2226.0%22%20y1%3D%2220.0%22%20x2%3D%2231.5%22%20y2%3D%2220.0%22%20stroke%3D%22%23c8a35a%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22/%3E%3Cline%20x1%3D%2223.0%22%20y1%3D%2225.2%22%20x2%3D%2225.8%22%20y2%3D%2230.0%22%20stroke%3D%22%23c8a35a%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22/%3E%3Cline%20x1%3D%2217.0%22%20y1%3D%2225.2%22%20x2%3D%2214.3%22%20y2%3D%2230.0%22%20stroke%3D%22%23c8a35a%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22/%3E%3Cline%20x1%3D%2214.0%22%20y1%3D%2220.0%22%20x2%3D%228.5%22%20y2%3D%2220.0%22%20stroke%3D%22%23c8a35a%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22/%3E%3Cline%20x1%3D%2217.0%22%20y1%3D%2214.8%22%20x2%3D%2214.2%22%20y2%3D%2210.0%22%20stroke%3D%22%23c8a35a%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22/%3E%3Cline%20x1%3D%2223.0%22%20y1%3D%2214.8%22%20x2%3D%2225.8%22%20y2%3D%2210.0%22%20stroke%3D%22%23c8a35a%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22/%3E%0A%3Ccircle%20cx%3D%2220%22%20cy%3D%2220%22%20r%3D%225.5%22%20fill%3D%22%23141f2c%22%20stroke%3D%22%23e6c37e%22%20stroke-width%3D%221.5%22/%3E%0A%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ============================ LOGIN ============================ -->
+<div id="login-screen">
+  <div class="contours" id="login-contours"></div>
+  <form class="login-card" id="login-form" autocomplete="off">
+    <div class="vault-door-wrap">
+      <svg class="vault-door" viewBox="0 0 320 320" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="doorFace" cx="35%" cy="30%" r="75%">
+            <stop offset="0%" stop-color="var(--bg-raised)"/>
+            <stop offset="100%" stop-color="var(--bg-panel)"/>
+          </radialGradient>
+          <radialGradient id="hubFace" cx="35%" cy="30%" r="75%">
+            <stop offset="0%" stop-color="#26374a"/>
+            <stop offset="100%" stop-color="var(--bg-deep)"/>
+          </radialGradient>
+        </defs>
+        <circle cx="160" cy="160" r="150" fill="none" stroke="var(--line)" stroke-width="1"/>
+        <circle cx="160" cy="160" r="142" fill="url(#doorFace)" stroke="var(--brass)" stroke-width="3"/>
+        <g>
+<circle cx="288.0" cy="160.0" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="281.7" cy="199.6" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="263.6" cy="235.2" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="235.2" cy="263.6" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="199.6" cy="281.7" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="160.0" cy="288.0" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="120.4" cy="281.7" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="84.8" cy="263.6" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="56.4" cy="235.2" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="38.3" cy="199.6" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="32.0" cy="160.0" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="38.3" cy="120.4" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="56.4" cy="84.8" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="84.8" cy="56.4" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="120.4" cy="38.3" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="160.0" cy="32.0" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="199.6" cy="38.3" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="235.2" cy="56.4" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="263.6" cy="84.8" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+<circle cx="281.7" cy="120.4" r="4" fill="var(--brass-dim)" stroke="var(--brass)" stroke-width="1"/>
+        </g>
+        <circle cx="160" cy="160" r="112" fill="none" stroke="var(--line-bright)" stroke-width="1.5"/>
+        <circle cx="160" cy="160" r="106" fill="none" stroke="var(--line)" stroke-width="1"/>
+        <g>
+<line x1="202.0" y1="160.0" x2="252.0" y2="160.0" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="252.0" cy="160.0" r="6.5" fill="var(--brass)"/>
+<line x1="189.7" y1="189.7" x2="225.1" y2="225.1" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="225.1" cy="225.1" r="6.5" fill="var(--brass)"/>
+<line x1="160.0" y1="202.0" x2="160.0" y2="252.0" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="160.0" cy="252.0" r="6.5" fill="var(--brass)"/>
+<line x1="130.3" y1="189.7" x2="94.9" y2="225.1" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="94.9" cy="225.1" r="6.5" fill="var(--brass)"/>
+<line x1="118.0" y1="160.0" x2="68.0" y2="160.0" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="68.0" cy="160.0" r="6.5" fill="var(--brass)"/>
+<line x1="130.3" y1="130.3" x2="94.9" y2="94.9" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="94.9" cy="94.9" r="6.5" fill="var(--brass)"/>
+<line x1="160.0" y1="118.0" x2="160.0" y2="68.0" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="160.0" cy="68.0" r="6.5" fill="var(--brass)"/>
+<line x1="189.7" y1="130.3" x2="225.1" y2="94.9" stroke="var(--brass)" stroke-width="6" stroke-linecap="round"/>
+<circle cx="225.1" cy="94.9" r="6.5" fill="var(--brass)"/>
+        </g>
+        <circle cx="160" cy="160" r="44" fill="url(#hubFace)" stroke="var(--brass-bright)" stroke-width="3"/>
+        <circle cx="160" cy="160" r="37" fill="#eef3f7" stroke="var(--brass)" stroke-width="2"/>
+        <clipPath id="logoClip"><circle cx="160" cy="160" r="33"/></clipPath>
+        <image href="basin-logo.png" x="122" y="122" width="76" height="76" clip-path="url(#logoClip)" preserveAspectRatio="xMidYMid meet"/>
+      </svg>
+    </div>
+    <div class="vault-nameplate">
+      <div class="vault-name">BASIN</div>
+      <div class="vault-name-sub">Treasury Vault</div>
+    </div>
+    <div class="login-sub">Cash Flow Command</div>
+
+    <div class="login-field">
+      <label for="login-user">User</label>
+      <select id="login-user">
+        <option value="nick">Nick</option>
+        <option value="joel">Joel</option>
+        <option value="wes">Wes</option>
+        <option value="daniel">Daniel</option>
+        <option value="eric">Eric</option>
+      </select>
+    </div>
+    <div class="login-field">
+      <label for="login-pass">Password</label>
+      <input type="password" id="login-pass" autocomplete="current-password" />
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <button type="submit" class="btn-primary" id="login-submit">Unlock Vault</button>
+  </form>
+</div>
+
+<!-- ============================ APP SHELL ============================ -->
+<div id="app">
+  <header class="topbar">
+    <div class="contours" id="topbar-contours"></div>
+    <div class="brand">
+      <svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="none" stroke="var(--brass)" stroke-width="2"/><circle cx="20" cy="20" r="12" fill="none" stroke="var(--line-bright)" stroke-width="1"/><line x1="26" y1="20" x2="31.5" y2="20" stroke="var(--brass)" stroke-width="1.8" stroke-linecap="round"/><line x1="14" y1="20" x2="8.5" y2="20" stroke="var(--brass)" stroke-width="1.8" stroke-linecap="round"/><line x1="20" y1="14" x2="20" y2="8.5" stroke="var(--brass)" stroke-width="1.8" stroke-linecap="round"/><line x1="20" y1="26" x2="20" y2="31.5" stroke="var(--brass)" stroke-width="1.8" stroke-linecap="round"/><circle cx="20" cy="20" r="5.5" fill="var(--bg-deep)" stroke="var(--brass-bright)" stroke-width="1.5"/></svg>
+      <div class="brand-text">
+        <div class="name">BASIN</div>
+        <div class="sub">Treasury Vault</div>
+      </div>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button data-view="forecast" class="active">CF Forecast</button>
+      <button data-view="receivables">Receivables</button>
+      <button data-view="payables">Payables</button>
+      <button data-view="fixed">Fixed Payments</button>
+      <button data-view="settings">Settings</button>
+    </nav>
+
+    <div class="topbar-right">
+      <div class="sync-pill" id="sync-pill" title="Click to sync now"><span class="sync-dot"></span><span id="sync-label">connecting…</span></div>
+      <div class="user-badge"><span class="user-dot" id="user-initial">N</span><span id="user-name">Nick</span><span class="role-tag" id="role-tag" style="display:none;">view only</span></div>
+      <button class="btn-brass" id="btn-save-version">Save Version</button>
+      <button class="btn-ghost" id="btn-logout">Log out</button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ===================== CF FORECAST ===================== -->
+    <section class="view active" id="view-forecast">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow" id="forecast-eyebrow">Cash Flow Forecast</div>
+          <h2 id="forecast-title">—</h2>
+          <div class="meta" id="forecast-meta"></div>
+        </div>
+        <div class="page-head-actions">
+          <select class="period-select" id="period-select"></select>
+        </div>
+      </div>
+
+      <div class="stat-row" id="forecast-stats"></div>
+
+      <div class="cf-table-wrap">
+        <table class="cf-grid" id="cf-grid"></table>
+      </div>
+    </section>
+
+    <!-- ===================== RECEIVABLES ===================== -->
+    <section class="view" id="view-receivables">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Receivables</div>
+          <h2>Accounts Receivable</h2>
+          <div class="meta" id="ar-meta"></div>
+        </div>
+        <div class="page-head-actions">
+          <button class="btn-ghost" id="ar-import-btn">Import Aged AR</button>
+          <button class="btn-ghost" id="ar-add-btn">+ Add</button>
+        </div>
+      </div>
+
+      <div class="stat-row" id="ar-stats"></div>
+      <div class="collect-row" id="ar-collect-row"></div>
+
+      <div class="toolbar">
+        <input type="search" id="ar-search" placeholder="Search customer, invoice #, PO…" />
+        <div class="chip-tabs" id="ar-status-tabs">
+          <button data-f="open" class="active">Open</button>
+          <button data-f="all">All</button>
+          <button data-f="paid">Paid</button>
+        </div>
+        <div class="spacer"></div>
+        <span class="meta mono" id="ar-count"></span>
+      </div>
+
+      <div class="table-scroll">
+        <table class="data-table" id="ar-table">
+          <thead><tr>
+            <th>Customer</th><th>Type</th><th>Invoice #</th><th>Date</th><th>PO #</th>
+            <th>Days →</th><th>CF Date</th><th>Age</th><th class="num">Balance</th><th>Status</th><th></th>
+          </tr></thead>
+          <tbody id="ar-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== PAYABLES ===================== -->
+    <section class="view" id="view-payables">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Payables</div>
+          <h2>Accounts Payable</h2>
+          <div class="meta" id="ap-meta"></div>
+        </div>
+        <div class="page-head-actions">
+          <button class="btn-ghost" id="ap-import-btn">Import Aged AP</button>
+          <button class="btn-ghost" id="ap-add-btn">+ Add</button>
+        </div>
+      </div>
+
+      <div class="stat-row" id="ap-stats"></div>
+
+      <div class="split">
+        <div>
+          <div class="toolbar">
+            <input type="search" id="ap-search" placeholder="Search vendor, invoice #…" />
+            <div class="chip-tabs" id="ap-status-tabs">
+              <button data-f="open" class="active">Unpaid</button>
+              <button data-f="scheduled">Scheduled</button>
+              <button data-f="unscheduled">Unscheduled</button>
+              <button data-f="all">All</button>
+            </div>
+            <div class="spacer"></div>
+            <span class="meta mono" id="ap-count"></span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="ap-table">
+              <thead><tr>
+                <th>Vendor</th><th>Invoice #</th><th>Date</th><th>Due</th>
+                <th class="num">Balance</th><th>Pay Run (CF Date)</th><th>Status</th><th></th>
+              </tr></thead>
+              <tbody id="ap-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel side-panel">
+          <h4>Pay Run Totals</h4>
+          <div id="ap-payrun-totals"></div>
+          <h4 style="margin-top:20px;">Top Vendor Balances</h4>
+          <div id="ap-vendor-rank"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FIXED PAYMENTS ===================== -->
+    <section class="view" id="view-fixed">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Recurring</div>
+          <h2>Fixed Payments</h2>
+          <div class="meta">Schedule rules auto-generate dates for the active period — monthly items fire on their day-of-month, weekly items fire every selected weekday.</div>
+        </div>
+        <div class="page-head-actions">
+          <span class="stat-card" style="padding:8px 16px;"><span class="label">This Period</span><span class="value brass mono" id="fixed-period-total">$0</span></span>
+        </div>
+      </div>
+      <div id="fixed-groups"></div>
+    </section>
+
+    <!-- ===================== SETTINGS ===================== -->
+    <section class="view" id="view-settings">
+      <div class="page-head">
+        <div><div class="eyebrow">Configuration</div><h2>Settings</h2></div>
+      </div>
+
+      <div class="panel settings-section">
+        <h3>Live Sync</h3>
+        <div class="desc">Every save pushes to the shared vault instantly. Both Nick and Joel see the latest data on load and via background sync.</div>
+        <div id="sync-status-detail" class="meta mono"></div>
+        <div style="margin-top:12px; display:flex; gap:8px;">
+          <button class="btn-brass" id="btn-push-now">Push Now</button>
+          <button class="btn-ghost" id="btn-pull-now">Pull Latest</button>
+        </div>
+      </div>
+
+      <div class="panel settings-section">
+        <h3>Forecast Periods</h3>
+        <div class="desc">Each period is a 5-week cash flow forecast starting on the Sunday you choose. Switch the active period to change what both users see. Old periods are kept permanently.</div>
+        <div id="periods-list"></div>
+        <button class="btn-ghost" id="btn-new-period" style="margin-top:12px;">+ New Period</button>
+      </div>
+
+      <div class="panel settings-section">
+        <h3>Version History</h3>
+        <div class="desc">Every push is snapshotted. Restore an earlier version if something goes wrong (last 30 saves are kept).</div>
+        <div id="history-list"></div>
+      </div>
+
+      <div class="panel settings-section">
+        <h3>Manual Outflow Categories</h3>
+        <div class="desc">These are the manually-entered weekly cash outflow lines on the CF Forecast tab (like Payroll or Distributions).</div>
+        <div id="outflow-categories"></div>
+        <button class="btn-ghost" id="btn-add-category" style="margin-top:10px;">+ Add Category</button>
+      </div>
+
+      <div class="panel settings-section">
+        <h3>Customer Auto-Schedule</h3>
+        <div class="desc">Permanent template — days-from-invoice and the auto-schedule toggle carry into every AR import. Auto-schedule is always optional; override any CF date manually on the Receivables tab at any time.</div>
+        <input type="text" class="mini-input" style="width:220px; margin-bottom:10px;" id="ar-auto-search" placeholder="Search customers…" />
+        <div class="auto-row head"><span>Customer</span><span>Days</span><span>Auto</span><span>Apply</span></div>
+        <div id="ar-auto-list" style="max-height:360px; overflow:auto;"></div>
+      </div>
+
+      <div class="panel settings-section">
+        <h3>Vendor Auto-Schedule</h3>
+        <div class="desc">Same idea, for payables. Toggle on to auto-assign a CF pay-run date whenever a vendor's days-from-invoice template is set.</div>
+        <input type="text" class="mini-input" style="width:220px; margin-bottom:10px;" id="ap-auto-search" placeholder="Search vendors…" />
+        <div class="auto-row head"><span>Vendor</span><span>Days</span><span>Auto</span><span>Apply</span></div>
+        <div id="ap-auto-list" style="max-height:360px; overflow:auto;"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="appfoot">BASIN ENGINEERING &amp; SURVEYING · TREASURY VAULT · INTERNAL USE ONLY</footer>
+</div>
+
+<!-- generic modal host -->
+<div id="modal-host"></div>
+<div id="toast-stack"></div>
+
+<input type="file" id="file-input-ar" accept=".xml,.csv,.xls,.xlsx" style="display:none" />
+<input type="file" id="file-input-ap" accept=".xml,.csv,.xls,.xlsx" style="display:none" />
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
