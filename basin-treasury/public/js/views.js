@@ -453,15 +453,23 @@ export function renderReceivables(store) {
 
   const collectRow = document.getElementById("ar-collect-row");
   collectRow.innerHTML = weeks.map((w) => {
-    const total = openList.filter((r) => weekIndexForDate(period, r.cfDate) === w.index).reduce((a, r) => a + r.balance, 0);
+    const bd = receivablesBreakdown(state, period, w.index);
     const isCurrent = w.index === 0;
-    return `<div class="collect-card ${isCurrent ? "current" : ""}">
-      <div class="wk">${fmtDateShort(w.start)} – ${fmtDateShort(w.end)}</div>
-      <div class="dt">${fmtDate(w.start)}</div>
-      <div class="amt">${fmtMoney(total)}</div>
-      <div class="tag">${isCurrent ? "Current Week" : "Scheduled"}</div>
+    const full = bd.totalAll > 0 && bd.pct >= 100;
+    return `<div class="collect-card ${isCurrent ? "current" : ""} ${full ? "full" : ""}" data-wi="${w.index}">
+      <div class="sand-fill" style="height:${bd.pct}%"><div class="sand-surface"></div></div>
+      <div class="card-content">
+        <div class="wk">${fmtDateShort(w.start)} – ${fmtDateShort(w.end)}</div>
+        <div class="dt">${fmtDate(w.start)}</div>
+        <div class="amt">${fmtMoney(bd.totalAll)}</div>
+        <div class="tag">${isCurrent ? "Current Week" : "Scheduled"} · ${bd.pct}% collected</div>
+      </div>
     </div>`;
   }).join("");
+  collectRow.querySelectorAll(".collect-card").forEach((card) => {
+    const wi = Number(card.dataset.wi);
+    attachBreakdownHover(card, () => receivablesBreakdown(state, period, wi), () => `Receivables — ${fmtDateShort(weeks[wi].start)} – ${fmtDateShort(weeks[wi].end)}`);
+  });
 
   document.querySelectorAll("#ar-status-tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.f === arFilter);

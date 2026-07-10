@@ -337,9 +337,10 @@ select.period-select{
 
 /* ===================== CF FORECAST GRID ===================== */
 .cf-table-wrap{
-  overflow:auto; max-height:calc(100vh - 300px); min-height:320px;
-  border-radius:var(--radius-lg); border:1px solid var(--line);
-  box-shadow:0 1px 0 rgba(255,255,255,0.03) inset, 0 20px 44px -26px rgba(0,0,0,0.8);
+  position:relative;
+  overflow:auto; max-height:calc(100vh - 190px); min-height:420px;
+  border-radius:var(--radius-lg); border:1px solid var(--line-bright);
+  box-shadow:0 1px 0 rgba(255,255,255,0.03) inset, 0 20px 44px -26px rgba(0,0,0,0.8), 0 0 0 1px rgba(200,163,90,0.08);
 }
 table.cf-grid{ width:100%; border-collapse:collapse; min-width:980px; }
 table.cf-grid th, table.cf-grid td{ padding:11px 16px; border-bottom:1px solid var(--line); white-space:nowrap; }
@@ -418,6 +419,11 @@ table.cf-grid td.overridden{ box-shadow: inset 0 0 0 1px var(--brass-dim); borde
 }
 
 .value-pos{ color:var(--green); } .value-neg{ color:var(--red); }
+.cf-scroll-fade{
+  position:sticky; left:0; bottom:0; width:100%; height:26px; margin-top:-26px;
+  background:linear-gradient(180deg, transparent, var(--bg-panel-alt) 85%);
+  pointer-events:none; z-index:4;
+}
 
 /* row label */
 .row-label-text{ flex:0 0 auto; }
@@ -431,16 +437,16 @@ table.cf-grid td.overridden{ box-shadow: inset 0 0 0 1px var(--brass-dim); borde
 
 /* mini pencil note icon, bottom-right corner of every cell */
 .cell-pencil{
-  position:absolute; right:1px; bottom:0px; z-index:2;
-  background:none; border:none; padding:0; margin:0; width:10px; height:10px;
-  font-size:6px; line-height:10px; text-align:center;
-  color:var(--text-dim); opacity:0; cursor:pointer;
-  transition:opacity .12s, color .12s;
+  position:absolute; right:2px; bottom:1px; z-index:2;
+  background:none; border:none; padding:0; margin:0; width:14px; height:14px;
+  font-size:9px; line-height:14px; text-align:center;
+  color:var(--text-dim); opacity:0.28; cursor:pointer;
+  transition:opacity .12s, color .12s, transform .12s;
 }
-table.cf-grid tbody tr:hover .cell-pencil{ opacity:0.22; }
-.cell-pencil:hover{ opacity:0.7 !important; color:var(--brass-bright); }
-.cell-pencil.has-note{ opacity:0.45; color:var(--brass); }
-.cell-pencil.has-note:hover{ opacity:0.8 !important; color:var(--brass-bright); }
+table.cf-grid tbody tr:hover .cell-pencil{ opacity:0.55; }
+.cell-pencil:hover{ opacity:1 !important; color:var(--brass-bright); transform:scale(1.25); }
+.cell-pencil.has-note{ opacity:0.75; color:var(--brass); }
+.cell-pencil.has-note:hover{ opacity:1 !important; color:var(--brass-bright); }
 
 .sticky-tooltip{
   position:absolute; z-index:500; max-width:220px; padding:12px 14px 14px;
@@ -503,15 +509,37 @@ td.rc-cell{ padding-bottom:9px; }
 
 .collect-row{ display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:10px; margin-bottom:18px; overflow-x:auto; }
 .collect-card{
+  position:relative; overflow:hidden; cursor:default;
   border:1px solid var(--line); border-radius:var(--radius-md); padding:14px; min-width:150px;
   background:var(--bg-panel-alt);
+  transition:border-color .3s;
 }
-.collect-card.current{ background:linear-gradient(160deg, var(--green-dim), var(--bg-panel-alt)); border-color:#2c5a44; }
+.collect-card.current{ border-color:#2c5a44; }
+.collect-card.full{ border-color:var(--brass); box-shadow:0 0 18px -4px rgba(200,163,90,0.45); }
+.collect-card .card-content{ position:relative; z-index:2; }
 .collect-card .wk{ font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px;}
 .collect-card .dt{ font-size:9.5px; color:var(--text-dim); margin-bottom:10px; font-family:var(--font-mono);}
 .collect-card .amt{ font-family:var(--font-mono); font-size:19px; font-weight:600; }
 .collect-card .tag{ font-size:9.5px; text-transform:uppercase; letter-spacing:0.08em; margin-top:4px; color:var(--text-dim);}
 .collect-card.current .tag{ color:var(--green); }
+
+/* sand fill — rises as receivables get marked paid, level with % collected */
+.sand-fill{
+  position:absolute; left:0; right:0; bottom:0; z-index:1; min-height:0;
+  background:
+    repeating-radial-gradient(circle at 20% 30%, rgba(255,255,255,0.10) 0, rgba(255,255,255,0.10) 1px, transparent 1px, transparent 6px),
+    linear-gradient(180deg, #e3c581 0%, #c9a45c 55%, #a9813f 100%);
+  opacity:0.55;
+  transition:height .5s cubic-bezier(.34,1.2,.64,1);
+}
+.collect-card.full .sand-fill{ opacity:0.7; }
+.sand-surface{
+  position:absolute; top:0; left:0; right:0; height:6px;
+  background:linear-gradient(180deg, rgba(255,241,209,0.9), rgba(230,195,126,0));
+  border-radius:50%/6px;
+  filter:blur(0.3px);
+}
+.collect-card.full .sand-surface{ box-shadow:0 0 10px 1px rgba(255,224,150,0.7); }
 
 table.data-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
 table.data-table thead th{
