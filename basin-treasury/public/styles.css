@@ -195,17 +195,8 @@ nav.tabs button.active{ color:var(--brass-bright); border-bottom-color:var(--bra
   color:var(--text-dim); border:1px solid var(--line-bright); padding:1px 6px; border-radius:8px;
 }
 
-/* who-edited-this initials badges */
-.who-badge{
-  position:absolute; top:2px; right:2px; width:14px; height:14px; border-radius:50%;
-  background:var(--brass); color:#171106; font-size:8px; font-weight:800; font-family:var(--font-mono);
-  display:flex; align-items:center; justify-content:center; line-height:1; z-index:1;
-}
-.who-inline{
-  display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:50%;
-  background:var(--bg-raised); border:1px solid var(--brass-dim); color:var(--brass-bright);
-  font-size:8.5px; font-weight:800; font-family:var(--font-mono); margin-left:6px; flex-shrink:0;
-}
+/* who-edited-this initials badges — hidden for now, revisit later */
+.who-badge, .who-inline{ display:none; }
 .view-only-banner{
   display:flex; align-items:center; gap:8px; padding:9px 16px; margin-bottom:16px;
   background:var(--bg-panel-alt); border:1px solid var(--line); border-left:3px solid var(--cyan);
@@ -219,6 +210,8 @@ body.viewer-mode .mini-select,
 body.viewer-mode .days-input,
 body.viewer-mode .days-in,
 body.viewer-mode .payrun-select,
+body.viewer-mode .pwp-check,
+body.viewer-mode .pwp-receivable-select,
 body.viewer-mode .toggle,
 body.viewer-mode .active-toggle,
 body.viewer-mode .cf-date,
@@ -329,12 +322,14 @@ select.period-select{
 .stat-card.sc-net{ --glow-color: rgba(200,163,90,0.20); }
 .stat-card.sc-close{ --glow-color: rgba(230,195,126,0.24); }
 .stat-card.sc-loc{ --glow-color: rgba(124,143,232,0.24); }
+.stat-card.sc-unc{ --glow-color: rgba(224,168,63,0.24); }
 .stat-card .label{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.1em; color:var(--text-dim); margin-bottom:8px; position:relative; }
 .stat-card .value{ font-family:var(--font-mono); font-size:22px; font-weight:600; position:relative; }
 .stat-card .value.green{ color:var(--green); } .stat-card .value.green{ text-shadow:0 0 18px rgba(79,214,148,0.25); }
 .stat-card .value.red{ color:var(--red); text-shadow:0 0 18px rgba(239,111,92,0.2); }
 .stat-card .value.brass{ color:var(--brass-bright); text-shadow:0 0 18px rgba(230,195,126,0.25); }
 .stat-card .value.indigo{ color:var(--indigo); text-shadow:0 0 18px rgba(124,143,232,0.3); }
+.stat-card .value.amber{ color:var(--amber); text-shadow:0 0 18px rgba(224,168,63,0.28); }
 .stat-card .sub{ font-size:11px; color:var(--text-dim); margin-top:4px; position:relative; }
 
 /* ===================== CF FORECAST GRID ===================== */
@@ -571,10 +566,25 @@ table.data-table td.name{ color:var(--text-hi); font-weight:500; }
   width:60px; background:var(--bg-deep); border:1px solid var(--line); color:var(--text-hi);
   padding:4px 6px; border-radius:3px; font-family:var(--font-mono); font-size:12px; text-align:center;
 }
+.mini-input.uncertain{ border-color:var(--amber); color:var(--amber); font-weight:700; }
+.uncertain-tag{
+  font-size:9.5px; font-weight:700; letter-spacing:0.06em; color:var(--amber);
+  background:var(--amber-dim); border:1px solid rgba(224,168,63,0.4); border-radius:10px; padding:2px 8px;
+}
+tr.uncertain-row td{ background:rgba(224,168,63,0.035); }
 .mini-select{
   background:var(--bg-deep); border:1px solid var(--line); color:var(--text-hi);
   padding:4px 6px; border-radius:3px; font-family:var(--font-mono); font-size:11.5px;
 }
+.pwp-toggle{
+  display:flex; align-items:center; gap:5px; font-size:10px; color:var(--text-dim);
+  text-transform:uppercase; letter-spacing:0.04em; margin-bottom:5px; cursor:pointer; white-space:nowrap;
+}
+.pwp-toggle input{ accent-color:var(--cyan); width:12px; height:12px; }
+.pwp-result{
+  font-family:var(--font-mono); font-size:10.5px; color:var(--cyan); margin-top:4px;
+}
+.pwp-result.unset{ color:var(--red); }
 
 /* side panel layout (payables) */
 .split{ display:grid; grid-template-columns:1fr 300px; gap:16px; align-items:start; }

@@ -21,6 +21,9 @@ const Store = {
   canEdit: false,
   activeView: "forecast",
   lastLocalEdit: 0,
+  editSeq: 0,
+  savedSeq: 0,
+  isSaving: false,
   historyCache: null,
 
   initials() {
@@ -35,6 +38,7 @@ const Store = {
     }
     fn(this.state);
     this.lastLocalEdit = Date.now();
+    this.editSeq++;
     this.render();
     this.scheduleSave();
   },
@@ -47,17 +51,28 @@ const Store = {
 
   scheduleSave: debounce(function () { Store.pushNow(); }, 1400),
 
+  hasUnsavedWork() {
+    return this.isSaving || this.editSeq !== this.savedSeq || (Date.now() - this.lastLocalEdit < 2000);
+  },
+
   async pushNow() {
+    if (this.isSaving) { this.scheduleSave(); return; } // a save is already in flight — try again after it finishes
+    const seqBeingSaved = this.editSeq;
+    this.isSaving = true;
     setSyncPill("saving", "saving…");
     try {
       const res = await api.saveState(this.state);
       this.state.version = res.version;
       this.state.updatedAt = res.updatedAt;
       this.state.updatedBy = res.updatedBy;
+      this.savedSeq = seqBeingSaved;
       setSyncPill("ok", `synced ${shortTime(res.updatedAt)}`);
+      if (this.editSeq !== seqBeingSaved) this.scheduleSave(); // more edits arrived mid-save — save those too
     } catch (err) {
       setSyncPill("err", "save failed — retrying");
       setTimeout(() => this.scheduleSave(), 4000);
+    } finally {
+      this.isSaving = false;
     }
   },
 
@@ -65,10 +80,11 @@ const Store = {
     try {
       const remote = await api.fetchState();
       if (!remote) return;
-      const dirtySoon = Date.now() - this.lastLocalEdit < 5000;
-      if (dirtySoon) { if (!silent) toast("You have unsaved edits — finish those before pulling.", "info"); return; }
+      if (this.hasUnsavedWork()) { if (!silent) toast("You have unsaved edits — finish those before pulling.", "info"); return; }
       if (this.state && remote.version === this.state.version) { if (!silent) toast("Already up to date", "info"); return; }
       this.state = remote;
+      this.editSeq = 0;
+      this.savedSeq = 0;
       this.render();
       if (!silent) toast(`Loaded latest version (v${remote.version}) from ${remote.updatedBy}`, "success");
       setSyncPill("ok", `synced ${shortTime(remote.updatedAt)}`);
@@ -127,6 +143,7 @@ async function boot() {
       remote = defaultState();
       remote.updatedBy = user.user;
     }
+    if (!remote.manualOutflowCategories.includes("Other")) remote.manualOutflowCategories.push("Other");
     Store.state = remote;
     showApp();
     Store.render();

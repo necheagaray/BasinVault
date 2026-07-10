@@ -1,7 +1,7 @@
 import { uid, toISO, parseISO, addDays, todayISO } from "./util.js";
 
 export const WEEKS_PER_PERIOD = 5;
-export const DEFAULT_OUTFLOW_CATEGORIES = ["Distributions", "Credit Card", "Sales Tax"];
+export const DEFAULT_OUTFLOW_CATEGORIES = ["Distributions", "Credit Card", "Sales Tax", "Other"];
 export const FIXED_CATEGORY_ORDER = [
   "Payroll",
   "401K",
@@ -126,6 +126,18 @@ export function payrollWeeksFor(period) {
   return weeks;
 }
 
+// "Pay when paid" — a payable's CF date is derived from the next pay run after
+// the linked receivable's own CF date, rather than being set directly.
+export function effectivePayableDate(state, period, payable) {
+  if (!payable.payWhenPaid || !payable.linkedReceivableId) return payable.cfDate;
+  const rec = state.receivables.find((r) => r.id === payable.linkedReceivableId);
+  if (!rec || !rec.cfDate) return null;
+  const weeks = periodWeeks(period);
+  const recDate = parseISO(rec.cfDate);
+  const next = weeks.find((w) => parseISO(w.payRun) > recDate);
+  return next ? next.payRun : null;
+}
+
 export function scheduleLabel(item) {
   if (item.scheduleType === "weekly") return `Weekly · Every ${WEEKDAYS[item.weekday ?? 4]}`;
   return `Monthly · Day ${item.dayOfMonth || 1}`;
@@ -161,7 +173,7 @@ export function computeForecast(state, period) {
   }
   for (const p of state.payables) {
     if (p.status !== "open") continue;
-    const wi = weekIndexForDate(period, p.cfDate);
+    const wi = weekIndexForDate(period, effectivePayableDate(state, period, p));
     if (wi !== null) scheduledPayables[wi] += p.balance;
   }
 
@@ -330,7 +342,7 @@ export function applyAutoScheduleToAll(state, kind) {
   const schedKey = kind === "AR" ? "customerAutoSchedule" : "vendorAutoSchedule";
   let count = 0;
   for (const x of state[listKey]) {
-    if (x.status !== "open") continue;
+    if (x.status !== "open" || x.payWhenPaid) continue;
     const tmpl = state[schedKey][x[groupKey]];
     if (tmpl?.auto && x.date) {
       x.cfDate = toISO(addDays(x.date, tmpl.days || 0));
@@ -348,7 +360,7 @@ export function applyAutoScheduleToGroup(state, kind, groupName) {
   if (!tmpl) return 0;
   let count = 0;
   for (const x of state[listKey]) {
-    if (x.status !== "open" || x[groupKey] !== groupName) continue;
+    if (x.status !== "open" || x[groupKey] !== groupName || x.payWhenPaid) continue;
     if (x.date) { x.cfDate = toISO(addDays(x.date, tmpl.days || 0)); count++; }
   }
   return count;

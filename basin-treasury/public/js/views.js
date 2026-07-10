@@ -2,6 +2,7 @@ import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeMod
 import {
   periodWeeks, computeForecast, weekIndexForDate, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor,
+  effectivePayableDate,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook } from "./parser.js";
 
@@ -111,8 +112,8 @@ function breakdownPopupHTML(bd, label) {
 
 function fixedBreakdown(state, period, rowType, cat, wi) {
   if (rowType === "apPayables") {
-    const list = state.payables.filter((p) => p.status === "open" && weekIndexForDate(period, p.cfDate) === wi);
-    return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber, amount: p.balance })), total: list.reduce((a, p) => a + p.balance, 0) };
+    const list = state.payables.filter((p) => p.status === "open" && weekIndexForDate(period, effectivePayableDate(state, period, p)) === wi);
+    return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber + (p.payWhenPaid ? " · PWP" : ""), amount: p.balance })), total: list.reduce((a, p) => a + p.balance, 0) };
   }
   if (cat === "Payroll" || cat === "401K") {
     const isPayrollWeek = payrollWeeksFor(period).includes(wi);
@@ -457,12 +458,15 @@ export function renderReceivables(store) {
   const openList = state.receivables.filter((r) => r.status === "open");
   const totalAR = state.receivables.reduce((a, r) => a + r.balance, 0);
   const openAR = openList.reduce((a, r) => a + r.balance, 0);
+  const uncertainList = openList.filter((r) => r.uncertain);
+  const uncertainTotal = uncertainList.reduce((a, r) => a + r.balance, 0);
 
   document.getElementById("ar-meta").textContent = `${state.receivables.length} invoices · ${openList.length} open`;
   document.getElementById("ar-stats").innerHTML = `
     <div class="stat-card"><div class="label">Total AR</div><div class="value">${fmtMoney(totalAR)}</div></div>
     <div class="stat-card"><div class="label">Open / Uncollected</div><div class="value">${fmtMoney(openAR)}</div></div>
     <div class="stat-card"><div class="label">Scheduled This Period</div><div class="value green">${fmtMoney(weeks.reduce((a, w) => a + openList.filter((r) => weekIndexForDate(period, r.cfDate) === w.index).reduce((s, r) => s + r.balance, 0), 0))}</div></div>
+    <div class="stat-card sc-unc"><div class="label">Uncertain</div><div class="value amber">${fmtMoney(uncertainTotal)}</div></div>
   `;
 
   const collectRow = document.getElementById("ar-collect-row");
@@ -490,6 +494,47 @@ export function renderReceivables(store) {
       renderReceivables(store);
     });
   });
+
+  const uncPanel = document.getElementById("ar-uncertain-panel");
+  if (uncertainList.length) {
+    uncPanel.innerHTML = `
+      <div class="panel" style="margin-bottom:18px; border-color:var(--amber-dim);">
+        <div class="fixed-group-head">
+          <h3 style="color:var(--amber);">⚠ Uncertain Collections <span class="count">${uncertainList.length} invoice${uncertainList.length === 1 ? "" : "s"} · ${fmtMoney(uncertainTotal)}</span></h3>
+        </div>
+        ${uncertainList.slice().sort((a, b) => b.balance - a.balance).map((r) => `
+          <div class="fixed-item" style="grid-template-columns:1fr 100px 90px;" data-id="${r.id}">
+            <div>
+              <div class="fname">${escapeHtml(r.customer)}</div>
+              <div class="fsched">${escapeHtml(r.docNumber || "")} · invoiced ${fmtDate(r.date)}</div>
+            </div>
+            <div class="famt">${fmtMoney(r.balance)}</div>
+            <div class="factions"><button class="mini-btn resolve-uncertain">Set Date</button></div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    uncPanel.querySelectorAll(".resolve-uncertain").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.closest(".fixed-item").dataset.id;
+        const input = document.createElement("input");
+        input.type = "date"; input.className = "mini-input";
+        const cell = btn.closest(".factions");
+        cell.innerHTML = ""; cell.appendChild(input); input.focus();
+        input.addEventListener("blur", () => {
+          if (!input.value) return;
+          store.mutate((s) => {
+            const item = s.receivables.find((x) => x.id === id);
+            item.uncertain = false;
+            item.cfDate = input.value;
+            item.lastEditBy = store.initials();
+          });
+        }, { once: true });
+      });
+    });
+  } else {
+    uncPanel.innerHTML = "";
+  }
 
   document.querySelectorAll("#ar-status-tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.f === arFilter);
@@ -528,14 +573,15 @@ function renderARRows(store, period) {
   tbody.innerHTML = list.map((r) => {
     const days = r.date ? Math.round((parseISO(r.cfDate || r.date) - parseISO(r.date)) / 86400000) : "";
     const whoBadge = r.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(r.lastEditBy)}">${escapeHtml(r.lastEditBy)}</span>` : "";
-    return `<tr class="${r.status === "paid" ? "paid" : ""}" data-id="${r.id}">
+    const daysVal = r.uncertain ? "unc" : (r.daysOverride ?? days);
+    return `<tr class="${r.status === "paid" ? "paid" : ""} ${r.uncertain ? "uncertain-row" : ""}" data-id="${r.id}">
       <td class="name">${escapeHtml(r.customer)}</td>
       <td>${escapeHtml(r.txnType || "")}</td>
       <td class="mono">${escapeHtml(r.docNumber || "")}</td>
       <td class="mono">${fmtDate(r.date)}</td>
       <td class="mono">${escapeHtml(r.poNumber || "—")}</td>
-      <td><input class="mini-input days-input" type="number" value="${r.daysOverride ?? days}" ${r.status !== "open" ? "disabled" : ""}/></td>
-      <td class="mono cf-date">${r.cfDate ? fmtDate(r.cfDate) : "—"}${whoBadge}</td>
+      <td><input class="mini-input days-input ${r.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the pay date is uncertain" ${r.status !== "open" ? "disabled" : ""}/></td>
+      <td class="mono cf-date">${r.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (r.cfDate ? fmtDate(r.cfDate) : "—")}${whoBadge}</td>
       <td class="mono">${r.age ?? "—"}${r.age ? "d" : ""}</td>
       <td class="num">${fmtMoney(r.balance)}</td>
       <td><span class="badge ${r.status}">${r.status}</span></td>
@@ -552,11 +598,19 @@ function renderARRows(store, period) {
     if (!rec) return;
 
     tr.querySelector(".days-input")?.addEventListener("change", (e) => {
-      const days = e.target.value === "" ? null : Number(e.target.value);
+      const raw = e.target.value.trim();
       store.mutate((s) => {
         const item = s.receivables.find((x) => x.id === id);
-        item.daysOverride = days;
-        item.cfDate = days === null ? item.cfDate : toISO(addDays(item.date, days));
+        if (raw.toLowerCase() === "unc") {
+          item.uncertain = true;
+          item.daysOverride = null;
+          item.cfDate = null;
+        } else {
+          const days = raw === "" ? null : Number(raw);
+          item.uncertain = false;
+          item.daysOverride = days;
+          item.cfDate = (days === null || days === 0 || Number.isNaN(days)) ? null : toISO(addDays(item.date, days));
+        }
         item.lastEditBy = store.initials();
       });
     });
@@ -581,6 +635,7 @@ function renderARRows(store, period) {
         store.mutate((s) => {
           const item = s.receivables.find((x) => x.id === id);
           item.cfDate = input.value || null;
+          if (input.value) item.uncertain = false;
           item.lastEditBy = store.initials();
         });
       }, { once: true });
@@ -600,10 +655,10 @@ export function renderPayables(store) {
 
   const openList = state.payables.filter((p) => p.status === "open");
   const totalAP = openList.reduce((a, p) => a + p.balance, 0);
-  const scheduled = openList.filter((p) => p.cfDate).reduce((a, p) => a + p.balance, 0);
+  const scheduled = openList.filter((p) => effectivePayableDate(state, period, p)).reduce((a, p) => a + p.balance, 0);
   const unscheduled = totalAP - scheduled;
 
-  document.getElementById("ap-meta").textContent = `${openList.length} open · ${openList.filter((p) => !p.cfDate).length} unscheduled`;
+  document.getElementById("ap-meta").textContent = `${openList.length} open · ${openList.filter((p) => !effectivePayableDate(state, period, p)).length} unscheduled`;
   document.getElementById("ap-stats").innerHTML = `
     <div class="stat-card"><div class="label">Open AP</div><div class="value">${fmtMoney(totalAP)}</div></div>
     <div class="stat-card"><div class="label">Scheduled</div><div class="value green">${fmtMoney(scheduled)}</div></div>
@@ -637,13 +692,13 @@ export function renderPayables(store) {
   payrunSel.innerHTML = `<option value="">All Pay Runs</option><option value="unscheduled" ${apPayrunFilter === "unscheduled" ? "selected" : ""}>— Unscheduled —</option>${weeks.map((w) => `<option value="${w.payRun}" ${w.payRun === apPayrunFilter ? "selected" : ""}>${fmtDate(w.payRun)}</option>`).join("")}`;
   payrunSel.onchange = () => { apPayrunFilter = payrunSel.value; renderPayables(store); };
 
-  document.getElementById("ap-copy-btn").onclick = () => copyPayablesToClipboard(state);
+  document.getElementById("ap-copy-btn").onclick = () => copyPayablesToClipboard(state, period);
 
   // pay run totals — clickable to filter, same as the dropdown
   const payrunHost = document.getElementById("ap-payrun-totals");
   payrunHost.innerHTML = weeks.map((w) => {
-    const total = openList.filter((p) => weekIndexForDate(period, p.cfDate) === w.index).reduce((a, p) => a + p.balance, 0);
-    const count = openList.filter((p) => weekIndexForDate(period, p.cfDate) === w.index).length;
+    const total = openList.filter((p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === w.index).reduce((a, p) => a + p.balance, 0);
+    const count = openList.filter((p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === w.index).length;
     const active = apPayrunFilter === w.payRun;
     return `<button type="button" class="vendor-rank payrun-filter-btn ${active ? "active" : ""}" data-payrun="${w.payRun}" title="Click to filter the table to this pay run">
       <span><span class="filter-icon">⏷</span>${fmtDate(w.payRun)} <span style="color:var(--text-dim)">(${count})</span></span><span class="amt">${fmtMoney(total)}</span>
@@ -673,20 +728,33 @@ function renderAPRows(store, period) {
   const weeks = periodWeeks(period);
   let list = state.payables;
   if (apFilter === "open") list = list.filter((p) => p.status === "open");
-  if (apFilter === "scheduled") list = list.filter((p) => p.status === "open" && p.cfDate);
-  if (apFilter === "unscheduled") list = list.filter((p) => p.status === "open" && !p.cfDate);
+  if (apFilter === "scheduled") list = list.filter((p) => p.status === "open" && effectivePayableDate(state, period, p));
+  if (apFilter === "unscheduled") list = list.filter((p) => p.status === "open" && !effectivePayableDate(state, period, p));
   if (apSearch) list = list.filter((p) => `${p.vendor} ${p.docNumber}`.toLowerCase().includes(apSearch));
   if (apVendorFilter) list = list.filter((p) => p.vendor === apVendorFilter);
-  if (apPayrunFilter === "unscheduled") list = list.filter((p) => !p.cfDate);
-  else if (apPayrunFilter) list = list.filter((p) => p.cfDate === apPayrunFilter);
+  if (apPayrunFilter === "unscheduled") list = list.filter((p) => !effectivePayableDate(state, period, p));
+  else if (apPayrunFilter) list = list.filter((p) => effectivePayableDate(state, period, p) === apPayrunFilter);
   list = list.slice().sort((a, b) => (a.vendor || "").localeCompare(b.vendor || "") || (a.date || "").localeCompare(b.date || ""));
 
   document.getElementById("ap-count").textContent = `${list.length} rows${apSelected.size ? ` · ${apSelected.size} selected` : ""}`;
   const tbody = document.getElementById("ap-tbody");
   if (!list.length) { tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><h4>No bills here</h4>Import your Aged AP export or add one manually.</div></td></tr>`; return; }
 
+  const openReceivables = state.receivables.filter((r) => r.status === "open").sort((a, b) => (a.customer || "").localeCompare(b.customer || ""));
+
   tbody.innerHTML = list.map((p) => {
     const whoBadge = p.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(p.lastEditBy)}">${escapeHtml(p.lastEditBy)}</span>` : "";
+    const effDate = effectivePayableDate(state, period, p);
+    const payrunCell = p.payWhenPaid
+      ? `<select class="mini-select pwp-receivable-select">
+          <option value="">— pick a receivable —</option>
+          ${openReceivables.map((r) => `<option value="${r.id}" ${p.linkedReceivableId === r.id ? "selected" : ""}>${escapeHtml(r.customer)} — ${escapeHtml(r.docNumber || "")} — ${fmtMoney(r.balance)}${r.cfDate ? " · " + fmtDate(r.cfDate) : " · unscheduled"}</option>`).join("")}
+        </select>
+        <div class="pwp-result ${effDate ? "" : "unset"}">${effDate ? `→ pays ${fmtDate(effDate)}` : "→ not scheduled (receivable unscheduled)"}</div>`
+      : `<select class="mini-select payrun-select">
+          <option value="">— unscheduled —</option>
+          ${weeks.map((w) => `<option value="${w.payRun}" ${p.cfDate === w.payRun ? "selected" : ""}>${fmtDate(w.payRun)}</option>`).join("")}
+        </select>`;
     return `<tr class="${p.status === "paid" ? "paid" : ""}" data-id="${p.id}">
       <td><input type="checkbox" class="row-select" ${apSelected.has(p.id) ? "checked" : ""} /></td>
       <td class="name">${escapeHtml(p.vendor)}</td>
@@ -694,10 +762,8 @@ function renderAPRows(store, period) {
       <td class="mono">${fmtDate(p.date)}</td>
       <td class="num">${fmtMoney(p.balance)}</td>
       <td>
-        <select class="mini-select payrun-select">
-          <option value="">— unscheduled —</option>
-          ${weeks.map((w) => `<option value="${w.payRun}" ${p.cfDate === w.payRun ? "selected" : ""}>${fmtDate(w.payRun)}</option>`).join("")}
-        </select>${whoBadge}
+        <label class="pwp-toggle"><input type="checkbox" class="pwp-check" ${p.payWhenPaid ? "checked" : ""} /> Pay when paid</label>
+        ${payrunCell}${whoBadge}
       </td>
       <td>
         <button class="mini-btn toggle-status">${p.status === "open" ? "Mark Paid" : "Reopen"}</button>
@@ -728,6 +794,21 @@ function renderAPRows(store, period) {
         item.lastEditBy = store.initials();
       });
     });
+    tr.querySelector(".pwp-check")?.addEventListener("change", (e) => {
+      store.mutate((s) => {
+        const item = s.payables.find((x) => x.id === id);
+        item.payWhenPaid = e.target.checked;
+        if (!e.target.checked) item.linkedReceivableId = null;
+        item.lastEditBy = store.initials();
+      });
+    });
+    tr.querySelector(".pwp-receivable-select")?.addEventListener("change", (e) => {
+      store.mutate((s) => {
+        const item = s.payables.find((x) => x.id === id);
+        item.linkedReceivableId = e.target.value || null;
+        item.lastEditBy = store.initials();
+      });
+    });
     tr.querySelector(".toggle-status")?.addEventListener("click", () => {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
@@ -744,18 +825,21 @@ function renderAPRows(store, period) {
   });
 }
 
-async function copyPayablesToClipboard(state) {
+async function copyPayablesToClipboard(state, period) {
   const selected = state.payables.filter((p) => apSelected.has(p.id));
   if (!selected.length) { toast("Select at least one row first (checkboxes on the left)", "error"); return; }
   selected.sort((a, b) => (a.vendor || "").localeCompare(b.vendor || "") || (a.date || "").localeCompare(b.date || ""));
   const header = ["Vendor", "Invoice #", "Date", "Balance", "Pay Run"].join("\t");
-  const rows = selected.map((p) => [
-    p.vendor || "",
-    p.docNumber || "",
-    p.date ? fmtDate(p.date) : "",
-    p.balance,
-    p.cfDate ? fmtDate(p.cfDate) : "Unscheduled",
-  ].join("\t"));
+  const rows = selected.map((p) => {
+    const eff = effectivePayableDate(state, period, p);
+    return [
+      p.vendor || "",
+      p.docNumber || "",
+      p.date ? fmtDate(p.date) : "",
+      p.balance,
+      eff ? `${fmtDate(eff)}${p.payWhenPaid ? " (PWP)" : ""}` : "Unscheduled",
+    ].join("\t");
+  });
   const text = [header, ...rows].join("\n");
 
   const done = () => toast(`Copied ${selected.length} payable${selected.length === 1 ? "" : "s"} to clipboard — paste into Excel, Slack, or email`, "success", 4500);
