@@ -480,6 +480,12 @@ export function renderReceivables(store) {
 
   document.getElementById("ar-import-btn").onclick = () => document.getElementById("file-input-ar").click();
   document.getElementById("ar-add-btn").onclick = () => openManualInvoiceModal(store, "AR");
+  document.getElementById("ar-clear-btn").onclick = () => {
+    if (!state.receivables.length) { toast("Receivables are already empty", "info"); return; }
+    if (!confirm(`Delete all ${state.receivables.length} receivable invoices? This can't be undone. Customer auto-schedule settings will be kept.`)) return;
+    store.mutate((s) => { s.receivables = []; });
+    toast("All receivables cleared — customer auto-schedule settings kept", "success");
+  };
 
   renderARRows(store, period);
 }
@@ -589,6 +595,13 @@ export function renderPayables(store) {
   document.getElementById("ap-search").oninput = (e) => { apSearch = e.target.value.toLowerCase(); renderAPRows(store, period); };
   document.getElementById("ap-import-btn").onclick = () => document.getElementById("file-input-ap").click();
   document.getElementById("ap-add-btn").onclick = () => openManualInvoiceModal(store, "AP");
+  document.getElementById("ap-clear-btn").onclick = () => {
+    if (!state.payables.length) { toast("Payables are already empty", "info"); return; }
+    if (!confirm(`Delete all ${state.payables.length} payable bills? This can't be undone. Vendor auto-schedule settings will be kept.`)) return;
+    apSelected.clear();
+    store.mutate((s) => { s.payables = []; });
+    toast("All payables cleared — vendor auto-schedule settings kept", "success");
+  };
 
   // vendor filter dropdown
   const vendorSel = document.getElementById("ap-vendor-filter");
