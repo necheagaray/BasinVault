@@ -410,6 +410,8 @@ table.cf-grid tr.locbalance-row td{
 table.cf-grid tr.locbalance-row td:first-child{ color:var(--indigo); }
 table.cf-grid td.loc-open{ box-shadow:inset 0 0 0 1.5px var(--indigo); border-radius:3px; }
 table.cf-grid td.loc-open:hover{ background:rgba(124,143,232,0.18) !important; }
+table.cf-grid td.opening-open{ box-shadow:inset 0 0 0 1.5px var(--brass); border-radius:3px; }
+table.cf-grid td.opening-open:hover{ background:rgba(200,163,90,0.18) !important; }
 
 table.cf-grid tr:hover td{ filter:brightness(1.12); }
 table.cf-grid td.cell-editable{ position:relative; cursor:pointer; }
@@ -511,13 +513,15 @@ td.rc-cell{ padding-bottom:9px; }
 
 .collect-row{ display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:10px; margin-bottom:18px; overflow-x:auto; }
 .collect-card{
-  position:relative; overflow:hidden; cursor:default;
+  position:relative; overflow:hidden; cursor:pointer;
   border:1px solid var(--line); border-radius:var(--radius-md); padding:14px; min-width:150px;
   background:var(--bg-panel-alt);
-  transition:border-color .3s;
+  transition:border-color .3s, box-shadow .2s;
 }
+.collect-card:hover{ border-color:var(--brass-dim); }
 .collect-card.current{ border-color:#2c5a44; }
 .collect-card.full{ border-color:var(--brass); box-shadow:0 0 18px -4px rgba(200,163,90,0.45); }
+.collect-card.filtered{ border-color:var(--brass); box-shadow:0 0 0 1.5px var(--brass), 0 0 18px -4px rgba(200,163,90,0.5); }
 .collect-card .card-content{ position:relative; z-index:2; }
 .collect-card .wk{ font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:2px;}
 .collect-card .dt{ font-size:9.5px; color:var(--text-dim); margin-bottom:10px; font-family:var(--font-mono);}

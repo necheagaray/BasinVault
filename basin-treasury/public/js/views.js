@@ -114,10 +114,10 @@ function fixedBreakdown(state, period, rowType, cat, wi) {
     const list = state.payables.filter((p) => p.status === "open" && weekIndexForDate(period, p.cfDate) === wi);
     return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber, amount: p.balance })), total: list.reduce((a, p) => a + p.balance, 0) };
   }
-  if (cat === "Payroll") {
+  if (cat === "Payroll" || cat === "401K") {
     const isPayrollWeek = payrollWeeksFor(period).includes(wi);
-    const amt = period.payroll?.amount || 0;
-    if (isPayrollWeek && amt) return { items: [{ name: "Payroll run", sub: "biweekly", amount: amt }], total: amt };
+    const amt = cat === "Payroll" ? (period.payroll?.amount || 0) : (period.k401?.amount || 0);
+    if (isPayrollWeek && amt) return { items: [{ name: cat === "Payroll" ? "Payroll run" : "401K contribution", sub: "biweekly", amount: amt }], total: amt };
     return { items: [], total: 0 };
   }
   const items = [];
@@ -196,7 +196,10 @@ export function renderForecast(store) {
     <thead><tr><th>Line Item</th>${weekHeaderCells(weeksMeta)}<th>Total</th></tr></thead>
     <tbody>
       <tr class="section-label"><td colspan="${weeks.length + 2}">Opening Balance</td></tr>
-      <tr class="opening" data-row="opening">${labelCell(period, "Opening Cash", "opening", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.opening)}</td>`).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
+      <tr class="opening" data-row="opening">${labelCell(period, "Opening Cash", "opening", null, false)}${weeks.map((r, wi) => wi === 0
+        ? `<td class="ed opening-open" data-wi="0">${fmtMoney(r.opening)}</td>`
+        : `<td>${fmtMoney(r.opening)}</td>`
+      ).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
 
       <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}">Cash Inflow</td></tr>
       <tr class="inflow-row rc-row" data-row="receivablesCollected">${labelCell(period, "Receivables Collected", "receivablesCollected", null, true)}${weeks.map((r, wi) => `<td class="ed rc-cell" data-wi="${wi}">${fmtMoney(r.receivablesCollected)}<div class="rc-bar" title="${rcBreakdowns[wi].pct}% collected"><div class="rc-bar-fill" style="width:${rcBreakdowns[wi].pct}%"></div></div></td>`).join("")}<td class="rc-cell rc-total-cell">${fmtMoney(calc.totals.receivablesCollected)}<div class="rc-bar" title="${rcTotalBreakdown.pct}% collected"><div class="rc-bar-fill" style="width:${rcTotalBreakdown.pct}%"></div></div></td></tr>
@@ -241,8 +244,19 @@ export function renderForecast(store) {
     }, { title: "This is the LOC balance as of the start of week 1, before that week's draw/(repayment). Click to set it." });
   }
 
+  // week-0 Opening Cash is also a direct field on the period, editable any time after creation
+  const openingOpenTd = table.querySelector('td.opening-open');
+  if (openingOpenTd) {
+    editableCell(openingOpenTd, period.openingCash || 0, (val) => {
+      store.mutate((s) => {
+        const per = s.periods.find((p) => p.id === period.id);
+        per.openingCash = val === null ? 0 : val;
+      });
+    }, { title: "This period's opening cash balance, set when the forecast was created. Click to change it." });
+  }
+
   // wire up editable cells + mark overridden + show who-badge
-  table.querySelectorAll("tr[data-row] td.ed:not(.loc-open)").forEach((td) => {
+  table.querySelectorAll("tr[data-row] td.ed:not(.loc-open):not(.opening-open)").forEach((td) => {
     const tr = td.closest("tr");
     const rowType = tr.dataset.row;
     const wi = Number(td.dataset.wi);
@@ -433,7 +447,7 @@ function setOrDel(obj, key, val) {
 
 /* ============================================================ RECEIVABLES ============================================================ */
 
-let arFilter = "open", arSearch = "";
+let arFilter = "open", arSearch = "", arWeekFilter = null;
 
 export function renderReceivables(store) {
   const { state } = store;
@@ -456,7 +470,8 @@ export function renderReceivables(store) {
     const bd = receivablesBreakdown(state, period, w.index);
     const isCurrent = w.index === 0;
     const full = bd.totalAll > 0 && bd.pct >= 100;
-    return `<div class="collect-card ${isCurrent ? "current" : ""} ${full ? "full" : ""}" data-wi="${w.index}">
+    const filtered = arWeekFilter === w.index;
+    return `<div class="collect-card ${isCurrent ? "current" : ""} ${full ? "full" : ""} ${filtered ? "filtered" : ""}" data-wi="${w.index}" title="Click to filter the table below to this week">
       <div class="sand-fill" style="height:${bd.pct}%"><div class="sand-surface"></div></div>
       <div class="card-content">
         <div class="wk">${fmtDateShort(w.start)} – ${fmtDateShort(w.end)}</div>
@@ -469,6 +484,11 @@ export function renderReceivables(store) {
   collectRow.querySelectorAll(".collect-card").forEach((card) => {
     const wi = Number(card.dataset.wi);
     attachBreakdownHover(card, () => receivablesBreakdown(state, period, wi), () => `Receivables — ${fmtDateShort(weeks[wi].start)} – ${fmtDateShort(weeks[wi].end)}`);
+    card.addEventListener("click", () => {
+      document.querySelectorAll(".breakdown-tooltip").forEach((el) => el.remove());
+      arWeekFilter = arWeekFilter === wi ? null : wi;
+      renderReceivables(store);
+    });
   });
 
   document.querySelectorAll("#ar-status-tabs button").forEach((b) => {
@@ -496,9 +516,12 @@ function renderARRows(store, period) {
   if (arFilter === "open") list = list.filter((r) => r.status === "open");
   if (arFilter === "paid") list = list.filter((r) => r.status === "paid");
   if (arSearch) list = list.filter((r) => `${r.customer} ${r.docNumber} ${r.poNumber || ""}`.toLowerCase().includes(arSearch));
+  if (arWeekFilter !== null) list = list.filter((r) => weekIndexForDate(period, r.cfDate) === arWeekFilter);
   list = list.slice().sort((a, b) => (a.customer || "").localeCompare(b.customer || "") || (a.date || "").localeCompare(b.date || ""));
 
-  document.getElementById("ar-count").textContent = `${list.length} rows`;
+  const weekLabel = arWeekFilter !== null ? ` · week of ${fmtDate(periodWeeks(period)[arWeekFilter].start)} <button id="ar-week-clear" class="mini-btn" style="margin-left:6px;">✕ clear</button>` : "";
+  document.getElementById("ar-count").innerHTML = `${list.length} rows${weekLabel}`;
+  document.getElementById("ar-week-clear")?.addEventListener("click", () => { arWeekFilter = null; renderReceivables(store); });
   const tbody = document.getElementById("ar-tbody");
   if (!list.length) { tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><h4>No invoices here</h4>Import your Aged AR export or add one manually.</div></td></tr>`; return; }
 
@@ -767,6 +790,7 @@ export function renderFixed(store) {
   const weeksMeta = periodWeeks(period);
   const payrollWeeks = payrollWeeksFor(period);
   const payrollAmt = period.payroll?.amount || 0;
+  const k401Amt = period.k401?.amount || 0;
   const payrollPanel = `
     <div class="panel fixed-group">
       <div class="fixed-group-head">
@@ -780,11 +804,23 @@ export function renderFixed(store) {
         </div>
       </div>
     </div>
+    <div class="panel fixed-group">
+      <div class="fixed-group-head">
+        <h3>401K <span class="count">biweekly · same weeks as Payroll</span></h3>
+        <span class="total">${fmtMoney(k401Amt)} / run</span>
+      </div>
+      <div class="fixed-item" style="grid-template-columns:1fr;">
+        <div class="fsched">${k401Amt
+          ? `Posts as an outflow of ${fmtMoney(k401Amt)} on the same weeks as Payroll: ${payrollWeeks.map((wi) => `Week ${wi + 1} (${fmtDateShort(weeksMeta[wi].start)})`).join(", ")}. Edit the 401K row directly on the CF Forecast grid to change it.`
+          : `No 401K amount set for this period yet. Set it next time you create a period, or click the 401K row on the CF Forecast grid to enter amounts directly.`}
+        </div>
+      </div>
+    </div>
   `;
 
-  let periodTotal = payrollWeeks.length * payrollAmt;
+  let periodTotal = payrollWeeks.length * (payrollAmt + k401Amt);
   const host = document.getElementById("fixed-groups");
-  host.innerHTML = payrollPanel + categories.filter((c) => c !== "Payroll").map((cat) => {
+  host.innerHTML = payrollPanel + categories.filter((c) => c !== "Payroll" && c !== "401K").map((cat) => {
     const items = state.fixedPayments.filter((f) => f.category === cat);
     let groupTotal = 0;
     const rows = items.map((item) => {
@@ -1046,6 +1082,8 @@ function openNewPeriodModal(store) {
       </select>
     </div>
     <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">Payroll is biweekly — the app will automatically post the same amount every 2 weeks after the week you pick.</div>
+    <div class="row"><label>401K Amount (per payroll run, as a positive number)</label><input id="np-401k-amt" type="number" value="0" /></div>
+    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">Posts automatically on the same weeks as Payroll.</div>
     <div class="modal-actions"><button class="btn-ghost" id="np-cancel">Cancel</button><button class="btn-primary" id="np-save" style="width:auto;">Create</button></div>
   `, {
     onMount: (host) => {
@@ -1057,12 +1095,14 @@ function openNewPeriodModal(store) {
         const loc = parseFloat(host.querySelector("#np-loc").value || "0");
         const payrollAmt = Math.abs(parseFloat(host.querySelector("#np-payroll-amt").value || "0"));
         const payrollWk = Number(host.querySelector("#np-payroll-wk").value || "0");
+        const k401Amt = Math.abs(parseFloat(host.querySelector("#np-401k-amt").value || "0"));
         if (!start) { toast("Pick a start date", "error"); return; }
         store.mutate((s) => {
           const p = makePeriod(uid("p"), label, start);
           p.openingCash = opening;
           p.locOpeningBalance = loc;
           p.payroll = { amount: payrollAmt, firstWeek: payrollWk };
+          p.k401 = { amount: k401Amt };
           s.periods.push(p);
           s.activePeriodId = p.id;
         });

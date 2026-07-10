@@ -4,6 +4,7 @@ export const WEEKS_PER_PERIOD = 5;
 export const DEFAULT_OUTFLOW_CATEGORIES = ["Distributions", "Credit Card", "Sales Tax"];
 export const FIXED_CATEGORY_ORDER = [
   "Payroll",
+  "401K",
   "Rent/Biz Insurance",
   "Utilities",
   "Benefits",
@@ -43,6 +44,7 @@ export function makePeriod(id, label, startISO) {
     openingCash: 0,
     locOpeningBalance: 0,
     payroll: { amount: 0, firstWeek: 0 },
+    k401: { amount: 0 },
     notes: {},
     overrides: {
       receivablesCollected: {},
@@ -170,13 +172,17 @@ export function computeForecast(state, period) {
 
   // payroll is period-specific (biweekly starting from the week chosen when the forecast was created)
   const payrollAmount = period.payroll?.amount || 0;
-  if (payrollAmount) {
-    for (const wi of payrollWeeksFor(period)) scheduledFixed.Payroll[wi] += payrollAmount;
+  const k401Amount = period.k401?.amount || 0;
+  if (payrollAmount || k401Amount) {
+    for (const wi of payrollWeeksFor(period)) {
+      if (payrollAmount) scheduledFixed.Payroll[wi] += payrollAmount;
+      if (k401Amount) scheduledFixed["401K"][wi] += k401Amount;
+    }
   }
 
   for (const item of state.fixedPayments) {
     if (item.active === false) continue;
-    if (item.category === "Payroll") continue; // payroll is period-driven now, not a recurring template
+    if (item.category === "Payroll" || item.category === "401K") continue; // period-driven, not a recurring template
     const occ = fixedOccurrencesInPeriod(item, period);
     for (const dateISO of occ) {
       const wi = weekIndexForDate(period, dateISO);
