@@ -109,13 +109,49 @@ function breakdownPopupHTML(bd, label) {
   `;
 }
 
-function attachBreakdownHover(td, getBreakdown, getLabel) {
+function fixedBreakdown(state, period, rowType, cat, wi) {
+  if (rowType === "apPayables") {
+    const list = state.payables.filter((p) => p.status === "open" && weekIndexForDate(period, p.cfDate) === wi);
+    return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber, amount: p.balance })), total: list.reduce((a, p) => a + p.balance, 0) };
+  }
+  if (cat === "Payroll") {
+    const isPayrollWeek = payrollWeeksFor(period).includes(wi);
+    const amt = period.payroll?.amount || 0;
+    if (isPayrollWeek && amt) return { items: [{ name: "Payroll run", sub: "biweekly", amount: amt }], total: amt };
+    return { items: [], total: 0 };
+  }
+  const items = [];
+  let total = 0;
+  for (const item of state.fixedPayments) {
+    if (item.category !== cat || item.active === false) continue;
+    for (const dateISO of fixedOccurrencesInPeriod(item, period)) {
+      if (weekIndexForDate(period, dateISO) === wi) {
+        items.push({ name: item.name, sub: fmtDate(dateISO), amount: item.amount });
+        total += item.amount;
+      }
+    }
+  }
+  return { items, total };
+}
+
+function fixedBreakdownPopupHTML(bd, label) {
+  const rowsHtml = bd.items
+    .map((it) => `<div class="bd-row"><span class="bd-name">${escapeHtml(it.name)}${it.sub ? `<span class="bd-inv">${escapeHtml(it.sub)}</span>` : ""}</span><span class="bd-amt">${fmtMoney(it.amount)}</span></div>`)
+    .join("");
+  return `
+    <div class="bd-header">${escapeHtml(label)}</div>
+    <div class="bd-summary">${fmtMoney(bd.total)} total</div>
+    ${bd.items.length ? rowsHtml : `<div class="bd-empty">Nothing scheduled this week</div>`}
+  `;
+}
+
+function attachBreakdownHover(td, getBreakdown, getLabel, buildHTML = breakdownPopupHTML) {
   let tip = null;
   td.addEventListener("mouseenter", () => {
     const bd = getBreakdown();
     tip = document.createElement("div");
     tip.className = "breakdown-tooltip";
-    tip.innerHTML = breakdownPopupHTML(bd, getLabel());
+    tip.innerHTML = buildHTML(bd, getLabel());
     document.body.appendChild(tip);
     const r = td.getBoundingClientRect();
     let left = r.left + window.scrollX;
@@ -150,7 +186,6 @@ export function renderForecast(store) {
     <div class="stat-card sc-out"><div class="label">Total Outflows</div><div class="value red">${fmtMoney(calc.totals.totalOutflows)}</div></div>
     <div class="stat-card sc-net"><div class="label">Net Cash Flow</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</div></div>
     <div class="stat-card sc-close"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
-    <div class="stat-card sc-loc"><div class="label">LOC Balance</div><div class="value indigo">${fmtMoney(calc.totals.locBalance)}</div></div>
   `;
 
   const rcBreakdowns = weeks.map((r, wi) => receivablesBreakdown(state, period, wi));
@@ -188,7 +223,7 @@ export function renderForecast(store) {
       <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
       <tr class="closing" data-row="closing">${labelCell(period, "Closing Cash", "closing", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
 
-      <tr class="locbalance-row" data-row="locBalanceOpening">${labelCell(period, "▣ LOC Balance", "locBalanceOpening", null, false)}${weeks.map((r, wi) => wi === 0
+      <tr class="locbalance-row" data-row="locBalanceOpening"><td><span class="row-label-text">▣ LOC Balance</span><span class="loc-open-badge" title="Opening LOC balance entered when this forecast was created">Opening ${fmtMoney(period.locOpeningBalance || 0)}</span></td>${weeks.map((r, wi) => wi === 0
         ? `<td class="ed loc-open" data-wi="0">${fmtMoney(r.locBalance)}</td>`
         : `<td>${fmtMoney(r.locBalance)}</td>`
       ).join("")}<td>${fmtMoney(calc.totals.locBalance)}</td></tr>
@@ -260,6 +295,31 @@ export function renderForecast(store) {
       () => (wi === null ? rcTotalBreakdown : rcBreakdowns[wi]),
       () => (wi === null ? "Receivables — Full Period" : `Receivables — ${fmtDateShort(weeksMeta[wi].start)} – ${fmtDateShort(weeksMeta[wi].end)}`)
     );
+  });
+
+  // individual scheduled-payment breakdown hover on the Fixed / Scheduled section (incl. AP Payables)
+  table.querySelectorAll("tr.fixed-row").forEach((tr) => {
+    const rowType = tr.dataset.row;
+    const cat = tr.dataset.cat || null;
+    const tds = Array.from(tr.children);
+    const rowLabel = rowType === "apPayables" ? "Weekly AP Payables" : cat;
+    tds.forEach((td, idx) => {
+      if (idx === 0) return; // label cell, nothing to break down
+      const wi = idx === tds.length - 1 ? null : idx - 1; // null = Total column
+      attachBreakdownHover(
+        td,
+        () => {
+          if (wi === null) {
+            let items = [], total = 0;
+            for (let i = 0; i < 5; i++) { const b = fixedBreakdown(state, period, rowType, cat, i); items = items.concat(b.items); total += b.total; }
+            return { items, total };
+          }
+          return fixedBreakdown(state, period, rowType, cat, wi);
+        },
+        () => `${rowLabel} — ${wi === null ? "Full Period" : `${fmtDateShort(weeksMeta[wi].start)} – ${fmtDateShort(weeksMeta[wi].end)}`}`,
+        fixedBreakdownPopupHTML
+      );
+    });
   });
 }
 
@@ -493,7 +553,8 @@ function renderARRows(store, period) {
 
 /* ============================================================ PAYABLES ============================================================ */
 
-let apFilter = "open", apSearch = "";
+let apFilter = "open", apSearch = "", apVendorFilter = "", apPayrunFilter = "";
+const apSelected = new Set();
 
 export function renderPayables(store) {
   const { state } = store;
@@ -521,13 +582,36 @@ export function renderPayables(store) {
   document.getElementById("ap-import-btn").onclick = () => document.getElementById("file-input-ap").click();
   document.getElementById("ap-add-btn").onclick = () => openManualInvoiceModal(store, "AP");
 
-  // pay run totals
+  // vendor filter dropdown
+  const vendorSel = document.getElementById("ap-vendor-filter");
+  const vendors = Array.from(new Set(state.payables.map((p) => p.vendor))).sort((a, b) => a.localeCompare(b));
+  vendorSel.innerHTML = `<option value="">All Vendors</option>${vendors.map((v) => `<option value="${escapeHtml(v)}" ${v === apVendorFilter ? "selected" : ""}>${escapeHtml(v)}</option>`).join("")}`;
+  vendorSel.onchange = () => { apVendorFilter = vendorSel.value; renderPayables(store); };
+
+  // pay-run filter dropdown
+  const payrunSel = document.getElementById("ap-payrun-filter");
+  payrunSel.innerHTML = `<option value="">All Pay Runs</option><option value="unscheduled" ${apPayrunFilter === "unscheduled" ? "selected" : ""}>— Unscheduled —</option>${weeks.map((w) => `<option value="${w.payRun}" ${w.payRun === apPayrunFilter ? "selected" : ""}>${fmtDate(w.payRun)}</option>`).join("")}`;
+  payrunSel.onchange = () => { apPayrunFilter = payrunSel.value; renderPayables(store); };
+
+  document.getElementById("ap-copy-btn").onclick = () => copyPayablesToClipboard(state);
+
+  // pay run totals — clickable to filter, same as the dropdown
   const payrunHost = document.getElementById("ap-payrun-totals");
   payrunHost.innerHTML = weeks.map((w) => {
     const total = openList.filter((p) => weekIndexForDate(period, p.cfDate) === w.index).reduce((a, p) => a + p.balance, 0);
     const count = openList.filter((p) => weekIndexForDate(period, p.cfDate) === w.index).length;
-    return `<div class="vendor-rank"><span>${fmtDate(w.payRun)} <span style="color:var(--text-dim)">(${count})</span></span><span class="amt">${fmtMoney(total)}</span></div>`;
+    const active = apPayrunFilter === w.payRun;
+    return `<button type="button" class="vendor-rank payrun-filter-btn ${active ? "active" : ""}" data-payrun="${w.payRun}" title="Click to filter the table to this pay run">
+      <span><span class="filter-icon">⏷</span>${fmtDate(w.payRun)} <span style="color:var(--text-dim)">(${count})</span></span><span class="amt">${fmtMoney(total)}</span>
+    </button>`;
   }).join("");
+  payrunHost.querySelectorAll(".payrun-filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const val = btn.dataset.payrun;
+      apPayrunFilter = apPayrunFilter === val ? "" : val;
+      renderPayables(store);
+    });
+  });
 
   // top vendor balances
   const byVendor = {};
@@ -548,15 +632,19 @@ function renderAPRows(store, period) {
   if (apFilter === "scheduled") list = list.filter((p) => p.status === "open" && p.cfDate);
   if (apFilter === "unscheduled") list = list.filter((p) => p.status === "open" && !p.cfDate);
   if (apSearch) list = list.filter((p) => `${p.vendor} ${p.docNumber}`.toLowerCase().includes(apSearch));
+  if (apVendorFilter) list = list.filter((p) => p.vendor === apVendorFilter);
+  if (apPayrunFilter === "unscheduled") list = list.filter((p) => !p.cfDate);
+  else if (apPayrunFilter) list = list.filter((p) => p.cfDate === apPayrunFilter);
   list = list.slice().sort((a, b) => (a.vendor || "").localeCompare(b.vendor || "") || (a.date || "").localeCompare(b.date || ""));
 
-  document.getElementById("ap-count").textContent = `${list.length} rows`;
+  document.getElementById("ap-count").textContent = `${list.length} rows${apSelected.size ? ` · ${apSelected.size} selected` : ""}`;
   const tbody = document.getElementById("ap-tbody");
-  if (!list.length) { tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><h4>No bills here</h4>Import your Aged AP export or add one manually.</div></td></tr>`; return; }
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><h4>No bills here</h4>Import your Aged AP export or add one manually.</div></td></tr>`; return; }
 
   tbody.innerHTML = list.map((p) => {
     const whoBadge = p.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(p.lastEditBy)}">${escapeHtml(p.lastEditBy)}</span>` : "";
     return `<tr class="${p.status === "paid" ? "paid" : ""}" data-id="${p.id}">
+      <td><input type="checkbox" class="row-select" ${apSelected.has(p.id) ? "checked" : ""} /></td>
       <td class="name">${escapeHtml(p.vendor)}</td>
       <td class="mono">${escapeHtml(p.docNumber || "")}</td>
       <td class="mono">${fmtDate(p.date)}</td>
@@ -574,8 +662,21 @@ function renderAPRows(store, period) {
     </tr>`;
   }).join("");
 
+  const selectAll = document.getElementById("ap-select-all");
+  selectAll.checked = list.length > 0 && list.every((p) => apSelected.has(p.id));
+  selectAll.onchange = () => {
+    if (selectAll.checked) list.forEach((p) => apSelected.add(p.id));
+    else list.forEach((p) => apSelected.delete(p.id));
+    renderAPRows(store, period);
+  };
+
   tbody.querySelectorAll("tr").forEach((tr) => {
     const id = tr.dataset.id;
+    tr.querySelector(".row-select")?.addEventListener("change", (e) => {
+      if (e.target.checked) apSelected.add(id); else apSelected.delete(id);
+      document.getElementById("ap-count").textContent = `${list.length} rows${apSelected.size ? ` · ${apSelected.size} selected` : ""}`;
+      selectAll.checked = list.every((p) => apSelected.has(p.id));
+    });
     tr.querySelector(".payrun-select")?.addEventListener("change", (e) => {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
@@ -593,9 +694,46 @@ function renderAPRows(store, period) {
     tr.querySelector(".del-row")?.addEventListener("click", () => {
       const rec = state.payables.find((x) => x.id === id);
       if (!confirm(`Remove bill ${rec.docNumber || ""} for ${rec.vendor}?`)) return;
+      apSelected.delete(id);
       store.mutate((s) => { s.payables = s.payables.filter((x) => x.id !== id); });
     });
   });
+}
+
+async function copyPayablesToClipboard(state) {
+  const selected = state.payables.filter((p) => apSelected.has(p.id));
+  if (!selected.length) { toast("Select at least one row first (checkboxes on the left)", "error"); return; }
+  selected.sort((a, b) => (a.vendor || "").localeCompare(b.vendor || "") || (a.date || "").localeCompare(b.date || ""));
+  const header = ["Vendor", "Invoice #", "Date", "Balance", "Pay Run"].join("\t");
+  const rows = selected.map((p) => [
+    p.vendor || "",
+    p.docNumber || "",
+    p.date ? fmtDate(p.date) : "",
+    p.balance,
+    p.cfDate ? fmtDate(p.cfDate) : "Unscheduled",
+  ].join("\t"));
+  const text = [header, ...rows].join("\n");
+
+  const done = () => toast(`Copied ${selected.length} payable${selected.length === 1 ? "" : "s"} to clipboard — paste into Excel, Slack, or email`, "success", 4500);
+
+  try {
+    await navigator.clipboard.writeText(text);
+    done();
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      done();
+    } catch {
+      toast("Couldn't copy to clipboard — your browser may be blocking it", "error");
+    }
+  }
 }
 
 /* ============================================================ FIXED PAYMENTS ============================================================ */
@@ -627,7 +765,6 @@ export function renderFixed(store) {
   const host = document.getElementById("fixed-groups");
   host.innerHTML = payrollPanel + categories.filter((c) => c !== "Payroll").map((cat) => {
     const items = state.fixedPayments.filter((f) => f.category === cat);
-    if (!items.length) return "";
     let groupTotal = 0;
     const rows = items.map((item) => {
       const occ = item.active === false ? [] : fixedOccurrencesInPeriod(item, period);
@@ -650,10 +787,10 @@ export function renderFixed(store) {
     periodTotal += groupTotal;
     return `<div class="panel fixed-group">
       <div class="fixed-group-head">
-        <h3>${escapeHtml(cat)}<span class="count">${items.length} active · ${fmtMoney(groupTotal)} this period</span></h3>
+        <h3>${escapeHtml(cat)}<span class="count">${items.length ? `${items.length} active · ${fmtMoney(groupTotal)} this period` : "nothing added yet"}</span></h3>
         <button class="btn-ghost add-fixed" data-cat="${escapeHtml(cat)}">+ Add</button>
       </div>
-      ${rows}
+      ${rows || `<div class="empty-state" style="padding:22px;"><h4>No ${escapeHtml(cat)} items yet</h4>Click "+ Add" above to set one up.</div>`}
     </div>`;
   }).join("") + `<div class="panel fixed-group"><div class="fixed-group-head"><h3>New Category</h3>
       <button class="btn-ghost" id="add-fixed-new-cat">+ Add Item In New Category</button></div></div>`;

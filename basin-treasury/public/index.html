@@ -210,6 +210,8 @@
         <div>
           <div class="toolbar">
             <input type="search" id="ap-search" placeholder="Search vendor, invoice #…" />
+            <select class="mini-select" id="ap-vendor-filter"><option value="">All Vendors</option></select>
+            <select class="mini-select" id="ap-payrun-filter"><option value="">All Pay Runs</option></select>
             <div class="chip-tabs" id="ap-status-tabs">
               <button data-f="open" class="active">Unpaid</button>
               <button data-f="scheduled">Scheduled</button>
@@ -217,11 +219,13 @@
               <button data-f="all">All</button>
             </div>
             <div class="spacer"></div>
+            <button class="btn-ghost" id="ap-copy-btn">⧉ Copy Selected</button>
             <span class="meta mono" id="ap-count"></span>
           </div>
           <div class="table-scroll">
             <table class="data-table" id="ap-table">
               <thead><tr>
+                <th style="width:30px;"><input type="checkbox" id="ap-select-all" /></th>
                 <th>Vendor</th><th>Invoice #</th><th>Date</th>
                 <th class="num">Balance</th><th>Pay Run (CF Date)</th><th></th>
               </tr></thead>
