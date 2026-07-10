@@ -11,3 +11,4 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "same-origin"
+    Cache-Control = "no-cache, must-revalidate"
