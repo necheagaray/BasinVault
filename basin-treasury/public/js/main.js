@@ -178,6 +178,12 @@ document.getElementById("btn-save-version").addEventListener("click", () => Stor
 
 document.getElementById("sync-pill").addEventListener("click", () => Store.pullNow());
 
+document.querySelector(".brand").addEventListener("click", () => {
+  Store.activeView = "forecast";
+  Store.render();
+});
+document.querySelector(".brand").title = "Back to CF Forecast";
+
 document.getElementById("tabs").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-view]");
   if (!btn) return;

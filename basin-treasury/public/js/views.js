@@ -3,7 +3,7 @@ import {
   periodWeeks, computeForecast, weekIndexForDate, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv,
 } from "./state.js";
-import { parseAgingReport } from "./parser.js";
+import { parseAgingReport, parseAgingWorkbook } from "./parser.js";
 
 /* ============================================================ helpers ============================================================ */
 
@@ -35,15 +35,60 @@ function weekHeaderCells(weeks) {
 
 /* ============================================================ CF FORECAST ============================================================ */
 
+function rowValue(weeksRows, rowType, cat, wi) {
+  const r = weeksRows[wi];
+  return {
+    receivablesCollected: r.receivablesCollected,
+    otherInflows: r.otherInflows,
+    manual: r.manualOutflows[cat],
+    fixed: r.fixedRows[cat],
+    apPayables: r.apPayables,
+    locDraw: r.locDraw,
+  }[rowType];
+}
+
+function overrideEntry(overrides, rowType, cat, wi) {
+  if (rowType === "receivablesCollected") return overrides.receivablesCollected[wi];
+  if (rowType === "otherInflows") return overrides.otherInflows[wi];
+  if (rowType === "manual") return overrides.manualOutflow?.[cat]?.[wi];
+  if (rowType === "fixed") return overrides.fixedGroup?.[cat]?.[wi];
+  if (rowType === "apPayables") return overrides.apPayables[wi];
+  if (rowType === "locDraw") return overrides.locDraw[wi];
+  return undefined;
+}
+
+function writeOverride(period, rowType, cat, wi, stamped) {
+  const o = period.overrides;
+  if (rowType === "receivablesCollected") setOrDel(o.receivablesCollected, wi, stamped);
+  if (rowType === "otherInflows") setOrDel(o.otherInflows, wi, stamped);
+  if (rowType === "manual") { o.manualOutflow[cat] = o.manualOutflow[cat] || {}; setOrDel(o.manualOutflow[cat], wi, stamped); }
+  if (rowType === "fixed") { o.fixedGroup[cat] = o.fixedGroup[cat] || {}; setOrDel(o.fixedGroup[cat], wi, stamped); }
+  if (rowType === "apPayables") setOrDel(o.apPayables, wi, stamped);
+  if (rowType === "locDraw") setOrDel(o.locDraw, wi, stamped);
+}
+
+function noteKey(rowType, cat) { return cat ? `${rowType}::${cat}` : rowType; }
+
+function labelCell(period, label, rowType, cat, editable) {
+  const key = noteKey(rowType, cat);
+  const hasNote = !!(period.notes && period.notes[key]);
+  const labelSpan = editable
+    ? `<span class="row-label-text clickable" data-row="${escapeHtml(rowType)}" data-cat="${escapeHtml(cat || "")}" title="Click to enter all 5 weeks at once">${escapeHtml(label)}</span>`
+    : `<span class="row-label-text">${escapeHtml(label)}</span>`;
+  const noteBtn = `<button type="button" class="note-btn ${hasNote ? "has-note" : ""}" data-key="${escapeHtml(key)}" title="${hasNote ? "View / edit note" : "Add a note"}">🗒</button>`;
+  return `<td>${labelSpan}${noteBtn}</td>`;
+}
+
 export function renderForecast(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
   const calc = computeForecast(state, period);
   const weeks = calc.weeks;
+  const weeksMeta = periodWeeks(period);
 
   document.getElementById("forecast-title").textContent = period.label;
   document.getElementById("forecast-eyebrow").textContent = `5-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
-  document.getElementById("forecast-meta").textContent = `Pay runs: ${periodWeeks(period).map((w) => fmtDate(w.payRun)).join(", ")}`;
+  document.getElementById("forecast-meta").textContent = `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
 
   const sel = document.getElementById("period-select");
   sel.innerHTML = state.periods.map((p) => `<option value="${p.id}" ${p.id === period.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
@@ -52,73 +97,75 @@ export function renderForecast(store) {
   const statRow = document.getElementById("forecast-stats");
   const netTotal = calc.totals.netCashflow;
   statRow.innerHTML = `
-    <div class="stat-card"><div class="label">Opening Cash</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
-    <div class="stat-card"><div class="label">Total Inflows</div><div class="value green">${fmtMoney(calc.totals.totalInflows)}</div></div>
-    <div class="stat-card"><div class="label">Total Outflows</div><div class="value red">${fmtMoney(calc.totals.totalOutflows)}</div></div>
-    <div class="stat-card"><div class="label">Net Cash Flow</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</div></div>
-    <div class="stat-card"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+    <div class="stat-card sc-open"><div class="label">Opening Cash</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
+    <div class="stat-card sc-in"><div class="label">Total Inflows</div><div class="value green">${fmtMoney(calc.totals.totalInflows)}</div></div>
+    <div class="stat-card sc-out"><div class="label">Total Outflows</div><div class="value red">${fmtMoney(calc.totals.totalOutflows)}</div></div>
+    <div class="stat-card sc-net"><div class="label">Net Cash Flow</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</div></div>
+    <div class="stat-card sc-close"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+    <div class="stat-card sc-loc"><div class="label">LOC Balance</div><div class="value indigo">${fmtMoney(calc.totals.locBalance)}</div></div>
   `;
 
   const table = document.getElementById("cf-grid");
   table.innerHTML = `
-    <thead><tr><th>Line Item</th>${weekHeaderCells(periodWeeks(period))}<th>Total</th></tr></thead>
+    <thead><tr><th>Line Item</th>${weekHeaderCells(weeksMeta)}<th>Total</th></tr></thead>
     <tbody>
       <tr class="section-label"><td colspan="${weeks.length + 2}">Opening Balance</td></tr>
-      <tr class="opening" data-row="opening"><td>Opening Cash</td>${weeks.map((r) => `<td>${fmtMoney(r.opening)}</td>`).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
+      <tr class="opening" data-row="opening">${labelCell(period, "Opening Cash", "opening", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.opening)}</td>`).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
 
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Cash Inflow</td></tr>
-      <tr class="inflow-row" data-row="receivablesCollected"><td>Receivables Collected</td>${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.receivablesCollected)}</td>`).join("")}<td>${fmtMoney(calc.totals.receivablesCollected)}</td></tr>
-      <tr class="inflow-row" data-row="otherInflows"><td>Other Inflows</td>${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.otherInflows)}</td>`).join("")}<td>${fmtMoney(calc.totals.otherInflows)}</td></tr>
-      <tr class="inflow-total"><td>Total Inflows</td>${weeks.map((r) => `<td class="value-pos">${fmtMoney(r.totalInflows)}</td>`).join("")}<td class="value-pos">${fmtMoney(calc.totals.totalInflows)}</td></tr>
+      <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}">Cash Inflow</td></tr>
+      <tr class="inflow-row" data-row="receivablesCollected">${labelCell(period, "Receivables Collected", "receivablesCollected", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.receivablesCollected)}</td>`).join("")}<td>${fmtMoney(calc.totals.receivablesCollected)}</td></tr>
+      <tr class="inflow-row" data-row="otherInflows">${labelCell(period, "Other Inflows", "otherInflows", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.otherInflows)}</td>`).join("")}<td>${fmtMoney(calc.totals.otherInflows)}</td></tr>
+      <tr class="inflow-total" data-row="totalInflows">${labelCell(period, "Total Inflows", "totalInflows", null, false)}${weeks.map((r) => `<td class="value-pos">${fmtMoney(r.totalInflows)}</td>`).join("")}<td class="value-pos">${fmtMoney(calc.totals.totalInflows)}</td></tr>
 
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Cash Outflow — Manual</td></tr>
+      <tr class="section-label sec-outflow-manual"><td colspan="${weeks.length + 2}">Cash Outflow — Manual</td></tr>
       ${state.manualOutflowCategories.map((cat) => `
-        <tr class="outflow-row" data-row="manual" data-cat="${escapeHtml(cat)}"><td>${escapeHtml(cat)}</td>${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.manualOutflows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.manualOutflows[cat])}</td></tr>
+        <tr class="outflow-row" data-row="manual" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "manual", cat, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.manualOutflows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.manualOutflows[cat])}</td></tr>
       `).join("")}
 
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Cash Outflow — Fixed / Scheduled</td></tr>
+      <tr class="section-label sec-outflow-fixed"><td colspan="${weeks.length + 2}">Cash Outflow — Fixed / Scheduled</td></tr>
       ${calc.fixedCategories.map((cat) => `
-        <tr class="fixed-row" data-row="fixed" data-cat="${escapeHtml(cat)}"><td>${escapeHtml(cat)}</td>${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.fixedRows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.fixedRows[cat])}</td></tr>
+        <tr class="fixed-row" data-row="fixed" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "fixed", cat, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.fixedRows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.fixedRows[cat])}</td></tr>
       `).join("")}
-      <tr class="fixed-row" data-row="apPayables"><td>◆ Weekly AP Payables</td>${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.apPayables)}</td>`).join("")}<td>${fmtMoney(calc.totals.apPayables)}</td></tr>
+      <tr class="fixed-row ap-row" data-row="apPayables">${labelCell(period, "◆ Weekly AP Payables", "apPayables", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.apPayables)}</td>`).join("")}<td>${fmtMoney(calc.totals.apPayables)}</td></tr>
 
-      <tr class="outflow-total"><td>Total Outflows</td>${weeks.map((r) => `<td class="value-neg">${fmtMoney(r.totalOutflows)}</td>`).join("")}<td class="value-neg">${fmtMoney(calc.totals.totalOutflows)}</td></tr>
+      <tr class="outflow-total" data-row="totalOutflows">${labelCell(period, "Total Outflows", "totalOutflows", null, false)}${weeks.map((r) => `<td class="value-neg">${fmtMoney(r.totalOutflows)}</td>`).join("")}<td class="value-neg">${fmtMoney(calc.totals.totalOutflows)}</td></tr>
 
-      <tr class="net"><td>Net Cashflow</td>${weeks.map((r) => `<td class="${r.netCashflow >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(r.netCashflow)}</td>`).join("")}<td class="${calc.totals.netCashflow >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(calc.totals.netCashflow)}</td></tr>
+      <tr class="net" data-row="net">${labelCell(period, "Net Cashflow", "net", null, false)}${weeks.map((r) => `<td class="${r.netCashflow >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(r.netCashflow)}</td>`).join("")}<td class="${calc.totals.netCashflow >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(calc.totals.netCashflow)}</td></tr>
 
-      <tr data-row="locDraw"><td>LOC Draw / (Repayment)</td>${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.locDraw)}</td>`).join("")}<td>${fmtMoney(calc.totals.locDraw)}</td></tr>
+      <tr class="loc-row" data-row="locDraw">${labelCell(period, "⟲ LOC Draw / (Repayment)", "locDraw", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.locDraw)}</td>`).join("")}<td>${fmtMoney(calc.totals.locDraw)}</td></tr>
 
       <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
-      <tr class="closing"><td>Closing Cash</td>${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
+      <tr class="closing" data-row="closing">${labelCell(period, "Closing Cash", "closing", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
+
+      <tr class="locbalance-row" data-row="locBalanceOpening">${labelCell(period, "▣ LOC Balance", "locBalanceOpening", null, false)}${weeks.map((r, wi) => wi === 0
+        ? `<td class="ed loc-open" data-wi="0">${fmtMoney(r.locBalance)}</td>`
+        : `<td>${fmtMoney(r.locBalance)}</td>`
+      ).join("")}<td>${fmtMoney(calc.totals.locBalance)}</td></tr>
     </tbody>
   `;
 
+  // week-0 LOC opening balance is a direct field on the period, not a week override
+  const locOpenTd = table.querySelector('td.loc-open');
+  if (locOpenTd) {
+    editableCell(locOpenTd, period.locOpeningBalance || 0, (val) => {
+      store.mutate((s) => {
+        const per = s.periods.find((p) => p.id === period.id);
+        per.locOpeningBalance = val === null ? 0 : val;
+      });
+    });
+  }
+
   // wire up editable cells + mark overridden + show who-badge
-  table.querySelectorAll("tr[data-row] td.ed").forEach((td) => {
+  table.querySelectorAll("tr[data-row] td.ed:not(.loc-open)").forEach((td) => {
     const tr = td.closest("tr");
     const rowType = tr.dataset.row;
     const wi = Number(td.dataset.wi);
     const cat = tr.dataset.cat;
-    const ov = period.overrides;
 
-    let entry;
-    if (rowType === "receivablesCollected") entry = ov.receivablesCollected[wi];
-    if (rowType === "otherInflows") entry = ov.otherInflows[wi];
-    if (rowType === "manual") entry = ov.manualOutflow?.[cat]?.[wi];
-    if (rowType === "fixed") entry = ov.fixedGroup?.[cat]?.[wi];
-    if (rowType === "apPayables") entry = ov.apPayables[wi];
-    if (rowType === "locDraw") entry = ov.locDraw[wi];
-
+    const entry = overrideEntry(period.overrides, rowType, cat, wi);
     const hasOverride = entry !== undefined;
     const who = hasOverride && typeof entry === "object" ? entry.by : null;
-    const currentVal = {
-      receivablesCollected: weeks[wi].receivablesCollected,
-      otherInflows: weeks[wi].otherInflows,
-      manual: weeks[wi].manualOutflows[cat],
-      fixed: weeks[wi].fixedRows[cat],
-      apPayables: weeks[wi].apPayables,
-      locDraw: weeks[wi].locDraw,
-    }[rowType];
+    const currentVal = rowValue(weeks, rowType, cat, wi);
 
     if (hasOverride) {
       td.classList.add("overridden");
@@ -128,16 +175,110 @@ export function renderForecast(store) {
     editableCell(td, currentVal, (val) => {
       store.mutate((s) => {
         const per = s.periods.find((p) => p.id === period.id);
-        const o = per.overrides;
         const stamped = val === null ? null : { v: val, by: store.initials(), at: new Date().toISOString() };
-        if (rowType === "receivablesCollected") setOrDel(o.receivablesCollected, wi, stamped);
-        if (rowType === "otherInflows") setOrDel(o.otherInflows, wi, stamped);
-        if (rowType === "manual") { o.manualOutflow[cat] = o.manualOutflow[cat] || {}; setOrDel(o.manualOutflow[cat], wi, stamped); }
-        if (rowType === "fixed") { o.fixedGroup[cat] = o.fixedGroup[cat] || {}; setOrDel(o.fixedGroup[cat], wi, stamped); }
-        if (rowType === "apPayables") setOrDel(o.apPayables, wi, stamped);
-        if (rowType === "locDraw") setOrDel(o.locDraw, wi, stamped);
+        writeOverride(per, rowType, cat, wi, stamped);
       });
     });
+  });
+
+  // click a row label to enter all 5 weeks at once
+  table.querySelectorAll(".row-label-text.clickable").forEach((span) => {
+    const rowType = span.dataset.row;
+    const cat = span.dataset.cat || null;
+    span.addEventListener("click", () => {
+      openBulkWeekModal(store, period, weeksMeta, weeks, rowType, cat, span.textContent);
+    });
+  });
+
+  // sticky-note hover + click-to-edit on every row
+  table.querySelectorAll(".note-btn").forEach((btn) => {
+    const key = btn.dataset.key;
+    let tooltipEl = null;
+    btn.addEventListener("mouseenter", () => {
+      const text = period.notes && period.notes[key];
+      if (!text) return;
+      tooltipEl = document.createElement("div");
+      tooltipEl.className = "sticky-tooltip";
+      tooltipEl.textContent = text;
+      document.body.appendChild(tooltipEl);
+      const r = btn.getBoundingClientRect();
+      tooltipEl.style.left = `${r.left + window.scrollX}px`;
+      tooltipEl.style.top = `${r.bottom + window.scrollY + 8}px`;
+    });
+    btn.addEventListener("mouseleave", () => { tooltipEl?.remove(); tooltipEl = null; });
+    btn.addEventListener("click", () => {
+      tooltipEl?.remove(); tooltipEl = null;
+      openNoteModal(store, period, key, btn.dataset.key);
+    });
+  });
+}
+
+function openBulkWeekModal(store, period, weeksMeta, weeksRows, rowType, cat, label) {
+  openModal(`
+    <h3>${escapeHtml(label)} — enter all 5 weeks</h3>
+    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:14px;">Leave a box empty to fall back to the computed/scheduled amount for that week.</div>
+    ${weeksMeta.map((w, wi) => `
+      <div class="row">
+        <label>${fmtDateShort(w.start)} – ${fmtDateShort(w.end)} <span style="opacity:.6;">(pay run ${fmtDate(w.payRun)})</span></label>
+        <input type="number" class="bulk-wk" data-wi="${wi}" value="${rowValue(weeksRows, rowType, cat, wi)}" />
+      </div>
+    `).join("")}
+    <div class="modal-actions">
+      <button class="btn-ghost" id="bw-cancel">Cancel</button>
+      <button class="btn-primary" id="bw-save" style="width:auto;">Save All 5 Weeks</button>
+    </div>
+  `, {
+    onMount: (host) => {
+      host.querySelector("#bw-cancel").onclick = closeModal;
+      host.querySelector("#bw-save").onclick = () => {
+        const inputs = host.querySelectorAll(".bulk-wk");
+        store.mutate((s) => {
+          const per = s.periods.find((p) => p.id === period.id);
+          inputs.forEach((inp) => {
+            const wi = Number(inp.dataset.wi);
+            const raw = inp.value.trim();
+            const stamped = raw === "" ? null : { v: parseFloat(raw), by: store.initials(), at: new Date().toISOString() };
+            writeOverride(per, rowType, cat, wi, stamped);
+          });
+        });
+        closeModal();
+        toast("Updated all 5 weeks", "success");
+      };
+    },
+  });
+}
+
+function openNoteModal(store, period, key) {
+  const existing = (period.notes && period.notes[key]) || "";
+  openModal(`
+    <h3>🗒 Note</h3>
+    <div class="row"><textarea id="note-text" rows="5" style="width:100%;background:var(--bg-panel-alt);border:1px solid var(--line);color:var(--text-hi);border-radius:6px;padding:10px;font-family:var(--font-body);font-size:13px;resize:vertical;">${escapeHtml(existing)}</textarea></div>
+    <div class="modal-actions">
+      ${existing ? `<button class="btn-ghost" id="note-del">Delete Note</button>` : ""}
+      <button class="btn-ghost" id="note-cancel">Cancel</button>
+      <button class="btn-primary" id="note-save" style="width:auto;">Save Note</button>
+    </div>
+  `, {
+    onMount: (host) => {
+      host.querySelector("#note-text").focus();
+      host.querySelector("#note-cancel").onclick = closeModal;
+      host.querySelector("#note-del")?.addEventListener("click", () => {
+        store.mutate((s) => {
+          const per = s.periods.find((p) => p.id === period.id);
+          if (per.notes) delete per.notes[key];
+        });
+        closeModal();
+      });
+      host.querySelector("#note-save").onclick = () => {
+        const text = host.querySelector("#note-text").value.trim();
+        store.mutate((s) => {
+          const per = s.periods.find((p) => p.id === period.id);
+          per.notes = per.notes || {};
+          if (text) per.notes[key] = text; else delete per.notes[key];
+        });
+        closeModal();
+      };
+    },
   });
 }
 
@@ -698,8 +839,10 @@ async function handleImportFile(store, input, kind) {
   input.value = "";
   if (!file) return;
   try {
-    const text = await file.text();
-    const parsed = parseAgingReport(text, kind);
+    const isBinaryWorkbook = /\.xlsx?$/i.test(file.name);
+    const parsed = isBinaryWorkbook
+      ? parseAgingWorkbook(await file.arrayBuffer(), kind)
+      : parseAgingReport(await file.text(), kind);
     if (!parsed.length) { toast("No open invoices found in that file", "error"); return; }
     store.mutate((s) => {
       const { added, updated, paidOff } = mergeAgingImport(s, kind, parsed);

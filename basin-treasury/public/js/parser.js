@@ -1,25 +1,37 @@
 // Parses a NetSuite "A/R Aging Detail" or "A/P Aging Detail" export.
-// Handles the Excel SpreadsheetML (.xml) format NetSuite produces, and a
-// plain CSV fallback with the same column headers. The report is a grouped
+// Handles three formats NetSuite can produce: the Excel SpreadsheetML (.xml)
+// export, a native .xlsx workbook (via SheetJS, loaded globally as `XLSX`),
+// and a plain .csv with the same column headers. The report is a grouped
 // listing (Vendor/Customer header row, its transactions, a Total row) —
 // we walk rows in order and attribute each transaction to the nearest
 // preceding group-header row, so it works regardless of nesting depth.
 
-function isoFromRaw(raw) {
-  if (!raw) return null;
-  const m = String(raw).match(/^(\d{4}-\d{2}-\d{2})/);
+function cellStr(v) {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return v.toISOString();
+  return String(v).trim();
+}
+
+function cellDateISO(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return null;
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+  }
+  const s = String(v);
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
   if (m) return m[1];
-  // fallback: try Date parsing (e.g. "6/30/2026")
-  const d = new Date(raw);
+  const d = new Date(s);
   if (!Number.isNaN(d.getTime())) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   return null;
 }
 
-function numFromRaw(raw) {
-  if (raw === null || raw === undefined || raw === "") return 0;
-  const n = parseFloat(String(raw).replace(/[$,()]/g, (c) => (c === "(" ? "-" : "")).replace(/[^0-9.\-]/g, ""));
+function cellNum(v) {
+  if (v === null || v === undefined || v === "") return 0;
+  if (typeof v === "number") return v;
+  const n = parseFloat(String(v).replace(/[$,()]/g, (c) => (c === "(" ? "-" : "")).replace(/[^0-9.\-]/g, ""));
   return Number.isNaN(n) ? 0 : n;
 }
 
@@ -60,16 +72,23 @@ function parseCsvRows(text) {
   return rows;
 }
 
-export function parseAgingReport(text, kind /* 'AR' | 'AP' */) {
-  const looksXml = /^\s*<\?xml/.test(text) || text.includes("<Workbook");
-  const rows = looksXml ? parseXmlRows(text) : parseCsvRows(text);
+function parseXlsxRows(arrayBuffer) {
+  if (typeof XLSX === "undefined") {
+    throw new Error("The spreadsheet reader didn't load — check your connection and try again.");
+  }
+  const wb = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error("That workbook doesn't have any sheets.");
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+}
 
+function extractRecords(rows, kind /* 'AR' | 'AP' */) {
   const groupKey = kind === "AR" ? "customer" : "vendor";
 
   // find the header row dynamically
   let headerIdx = -1, colMap = null;
   for (let i = 0; i < rows.length; i++) {
-    const r = rows[i].map((c) => c.trim().toLowerCase());
+    const r = rows[i].map((c) => cellStr(c).toLowerCase());
     if ((r[0] === "vendor" || r[0] === "customer") && r[1] === "transaction type") {
       headerIdx = i;
       colMap = {};
@@ -81,7 +100,6 @@ export function parseAgingReport(text, kind /* 'AR' | 'AP' */) {
     throw new Error("Couldn't find the header row (expected columns like Vendor/Customer, Transaction Type, Date…). Is this a NetSuite Aging Detail export?");
   }
 
-  const iGroup = colMap["vendor"] ?? colMap["customer"];
   const iType = colMap["transaction type"];
   const iDate = colMap["date"];
   const iDoc = colMap["document number"];
@@ -95,13 +113,13 @@ export function parseAgingReport(text, kind /* 'AR' | 'AP' */) {
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r.length) continue;
-    const c0 = (r[0] || "").trim();
-    const typeVal = (r[iType] || "").trim();
+    if (!r || !r.length) continue;
+    const c0 = cellStr(r[0]);
+    const typeVal = cellStr(r[iType]);
 
     if (!typeVal) {
       // possible group header row: only first cell populated, not a Total line
-      const restBlank = r.every((v, idx) => idx === 0 || !String(v).trim());
+      const restBlank = r.every((v, idx) => idx === 0 || !cellStr(v));
       if (c0 && restBlank && !/^total\b/i.test(c0)) {
         currentGroup = c0;
       }
@@ -114,14 +132,27 @@ export function parseAgingReport(text, kind /* 'AR' | 'AP' */) {
     records.push({
       [groupKey]: currentGroup,
       txnType: typeVal,
-      date: isoFromRaw(r[iDate]),
-      docNumber: (r[iDoc] || "").trim(),
-      ...(kind === "AR" ? { poNumber: (r[iPO] || "").trim() } : {}),
-      dueDate: isoFromRaw(r[iDue]),
-      age: iAge !== undefined ? Math.round(numFromRaw(r[iAge])) : null,
-      balance: numFromRaw(r[iBal]),
+      date: cellDateISO(r[iDate]),
+      docNumber: cellStr(r[iDoc]),
+      ...(kind === "AR" ? { poNumber: cellStr(r[iPO]) } : {}),
+      dueDate: cellDateISO(r[iDue]),
+      age: iAge !== undefined ? Math.round(cellNum(r[iAge])) : null,
+      balance: cellNum(r[iBal]),
     });
   }
 
   return records;
+}
+
+// text-based formats: NetSuite's SpreadsheetML .xml export, or a .csv with the same headers
+export function parseAgingReport(text, kind) {
+  const looksXml = /^\s*<\?xml/.test(text) || text.includes("<Workbook");
+  const rows = looksXml ? parseXmlRows(text) : parseCsvRows(text);
+  return extractRecords(rows, kind);
+}
+
+// native .xlsx workbook
+export function parseAgingWorkbook(arrayBuffer, kind) {
+  const rows = parseXlsxRows(arrayBuffer);
+  return extractRecords(rows, kind);
 }

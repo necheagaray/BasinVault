@@ -41,6 +41,8 @@ export function makePeriod(id, label, startISO) {
     label,
     startDate: startISO,
     openingCash: 0,
+    locOpeningBalance: 0,
+    notes: {},
     overrides: {
       receivablesCollected: {},
       otherInflows: {},
@@ -211,6 +213,14 @@ export function computeForecast(state, period) {
     opening = row.closing;
   }
 
+  // running LOC balance — week 0 shows the manually-entered opening balance;
+  // each later week folds in that week's own draw/(repayment).
+  let locBal = period.locOpeningBalance || 0;
+  rows.forEach((row, i) => {
+    if (i > 0) locBal += row.locDraw;
+    row.locBalance = locBal;
+  });
+
   const totals = {
     opening: rows[0]?.opening ?? 0,
     closing: rows[rows.length - 1]?.closing ?? 0,
@@ -225,6 +235,7 @@ export function computeForecast(state, period) {
     totalOutflows: sum(rows.map((r) => r.totalOutflows)),
     netCashflow: sum(rows.map((r) => r.netCashflow)),
     locDraw: sum(rows.map((r) => r.locDraw)),
+    locBalance: rows[rows.length - 1]?.locBalance ?? (period.locOpeningBalance || 0),
   };
 
   return { weeks: rows, totals, fixedCategories };

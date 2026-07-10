@@ -65,9 +65,8 @@ password you set above. Sessions last 21 days.
 ## Importing from NetSuite
 
 Run the standard **A/R Aging Detail** or **A/P Aging Detail** report in
-NetSuite, export it (**Export → Excel** — NetSuite saves this as an
-`.xml` Excel-XML file, which is exactly what the importer expects; a plain
-`.csv` with the same column headers also works), and use **Import Aged AR** /
+NetSuite and export it — **.xlsx**, **.xml** (NetSuite's Excel-XML export),
+or a **.csv** with the same column headers all work. Use **Import Aged AR** /
 **Import Aged AP** on the respective tab.
 
 Behavior on import:
