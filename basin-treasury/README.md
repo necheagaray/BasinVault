@@ -100,12 +100,23 @@ diverges from the original forecast during the week without having to move
 every underlying invoice. Click the cell and clear it to fall back to the
 computed value.
 
+## Payroll
+
+Payroll moved out of the manual weekly-entry list and is now set once, when
+you create a new forecast period (Settings → **+ New Period**): opening cash,
+opening LOC balance, the payroll amount (as a positive number — it posts as
+an outflow), and which of the 5 weeks the first pay run falls in. Since
+payroll is biweekly, the app automatically figures out the other week(s) in
+that same period that also get a payroll outflow of the same amount. You can
+still fine-tune any individual week (or all 5 at once) directly on the
+Payroll row of the CF Forecast grid, exactly like any other fixed-payment row.
+
 ## Sync between Nick and Joel
 
 Every edit auto-saves ~1.5s after you stop typing. The app also polls for the
 other person's changes every 20 seconds and on window focus — if you have
 unsaved edits in flight it won't clobber them. **Save Version** forces an
-immediate push and snapshot. Settings → **Version History** keeps the last 30
+immediate push and snapshot. Settings → **Version History** keeps the last 3
 saves and lets you restore any of them.
 
 Every override on the CF Forecast grid, and every manual edit on Receivables,

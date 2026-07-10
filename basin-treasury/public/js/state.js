@@ -1,13 +1,13 @@
 import { uid, toISO, parseISO, addDays, todayISO } from "./util.js";
 
 export const WEEKS_PER_PERIOD = 5;
-export const DEFAULT_OUTFLOW_CATEGORIES = ["Payroll", "Distributions", "Credit Card", "Sales Tax"];
+export const DEFAULT_OUTFLOW_CATEGORIES = ["Distributions", "Credit Card", "Sales Tax"];
 export const FIXED_CATEGORY_ORDER = [
-  "Insurance",
-  "Benefits & Payroll Liabilities",
-  "Equipment & Auto Debt",
-  "Other Long Term Debt",
-  "Other Fixed",
+  "Payroll",
+  "Rent/Biz Insurance",
+  "Utilities",
+  "Benefits",
+  "Debt",
 ];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -42,6 +42,7 @@ export function makePeriod(id, label, startISO) {
     startDate: startISO,
     openingCash: 0,
     locOpeningBalance: 0,
+    payroll: { amount: 0, firstWeek: 0 },
     notes: {},
     overrides: {
       receivablesCollected: {},
@@ -116,6 +117,13 @@ export function fixedOccurrencesInPeriod(item, period) {
 
 function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 
+export function payrollWeeksFor(period) {
+  const weeks = [];
+  const firstWeek = period.payroll?.firstWeek ?? 0;
+  for (let wi = firstWeek; wi < WEEKS_PER_PERIOD; wi += 2) weeks.push(wi);
+  return weeks;
+}
+
 export function scheduleLabel(item) {
   if (item.scheduleType === "weekly") return `Weekly · Every ${WEEKDAYS[item.weekday ?? 4]}`;
   return `Monthly · Day ${item.dayOfMonth || 1}`;
@@ -137,6 +145,9 @@ function ovVal(bucket, key, wi, fallback) {
 export function computeForecast(state, period) {
   const weeks = periodWeeks(period);
   const ov = period.overrides;
+  // "Payroll" moved to the Fixed section (period-driven, biweekly) — strip any stray
+  // leftover from older saved data so it doesn't show twice.
+  const manualCats = state.manualOutflowCategories.filter((c) => c !== "Payroll");
 
   // scheduled (computed) amounts per week, before overrides
   const scheduledReceivables = Array(WEEKS_PER_PERIOD).fill(0);
@@ -156,8 +167,16 @@ export function computeForecast(state, period) {
   const fixedCategories = Array.from(new Set([...FIXED_CATEGORY_ORDER, ...state.fixedPayments.map((f) => f.category)]));
   const scheduledFixed = {};
   for (const cat of fixedCategories) scheduledFixed[cat] = Array(WEEKS_PER_PERIOD).fill(0);
+
+  // payroll is period-specific (biweekly starting from the week chosen when the forecast was created)
+  const payrollAmount = period.payroll?.amount || 0;
+  if (payrollAmount) {
+    for (const wi of payrollWeeksFor(period)) scheduledFixed.Payroll[wi] += payrollAmount;
+  }
+
   for (const item of state.fixedPayments) {
     if (item.active === false) continue;
+    if (item.category === "Payroll") continue; // payroll is period-driven now, not a recurring template
     const occ = fixedOccurrencesInPeriod(item, period);
     for (const dateISO of occ) {
       const wi = weekIndexForDate(period, dateISO);
@@ -173,7 +192,7 @@ export function computeForecast(state, period) {
 
     const manualOutflows = {};
     let manualTotal = 0;
-    for (const cat of state.manualOutflowCategories) {
+    for (const cat of manualCats) {
       const v = readOv(ov.manualOutflow?.[cat]?.[wi]) ?? 0;
       manualOutflows[cat] = v;
       manualTotal += v;
@@ -213,11 +232,13 @@ export function computeForecast(state, period) {
     opening = row.closing;
   }
 
-  // running LOC balance — week 0 shows the manually-entered opening balance;
-  // each later week folds in that week's own draw/(repayment).
+  // running LOC balance — you enter the balance as of the start of week 1
+  // (before that week's activity); each week's displayed balance is the
+  // running total AFTER that week's own draw/(repayment) is applied,
+  // exactly like Opening/Closing Cash.
   let locBal = period.locOpeningBalance || 0;
-  rows.forEach((row, i) => {
-    if (i > 0) locBal += row.locDraw;
+  rows.forEach((row) => {
+    locBal += row.locDraw;
     row.locBalance = locBal;
   });
 
@@ -227,7 +248,7 @@ export function computeForecast(state, period) {
     receivablesCollected: sum(rows.map((r) => r.receivablesCollected)),
     otherInflows: sum(rows.map((r) => r.otherInflows)),
     totalInflows: sum(rows.map((r) => r.totalInflows)),
-    manualOutflows: Object.fromEntries(state.manualOutflowCategories.map((c) => [c, sum(rows.map((r) => r.manualOutflows[c]))])),
+    manualOutflows: Object.fromEntries(manualCats.map((c) => [c, sum(rows.map((r) => r.manualOutflows[c]))])),
     manualTotal: sum(rows.map((r) => r.manualTotal)),
     fixedRows: Object.fromEntries(fixedCategories.map((c) => [c, sum(rows.map((r) => r.fixedRows[c]))])),
     fixedTotal: sum(rows.map((r) => r.fixedTotal)),

@@ -1,15 +1,15 @@
 import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeModal, uid, todayISO, toISO, addDays, parseISO } from "./util.js";
 import {
   periodWeeks, computeForecast, weekIndexForDate, fixedOccurrencesInPeriod, scheduleLabel,
-  FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv,
+  FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook } from "./parser.js";
 
 /* ============================================================ helpers ============================================================ */
 
-function editableCell(td, value, onCommit, { allowNegativeAsIs = false } = {}) {
+function editableCell(td, value, onCommit, { title = "Click to override this week's amount" } = {}) {
   td.classList.add("cell-editable");
-  td.title = "Click to override this week's amount";
+  td.title = title;
   td.addEventListener("click", () => {
     if (td.querySelector("input")) return;
     const raw = value ?? 0;
@@ -67,16 +67,64 @@ function writeOverride(period, rowType, cat, wi, stamped) {
   if (rowType === "locDraw") setOrDel(o.locDraw, wi, stamped);
 }
 
-function noteKey(rowType, cat) { return cat ? `${rowType}::${cat}` : rowType; }
+function noteKey(rowType, cat, wi) {
+  const base = cat ? `${rowType}::${cat}` : rowType;
+  return wi === undefined || wi === null ? base : `${base}::${wi}`;
+}
 
 function labelCell(period, label, rowType, cat, editable) {
-  const key = noteKey(rowType, cat);
-  const hasNote = !!(period.notes && period.notes[key]);
   const labelSpan = editable
     ? `<span class="row-label-text clickable" data-row="${escapeHtml(rowType)}" data-cat="${escapeHtml(cat || "")}" title="Click to enter all 5 weeks at once">${escapeHtml(label)}</span>`
     : `<span class="row-label-text">${escapeHtml(label)}</span>`;
-  const noteBtn = `<button type="button" class="note-btn ${hasNote ? "has-note" : ""}" data-key="${escapeHtml(key)}" title="${hasNote ? "View / edit note" : "Add a note"}">🗒</button>`;
-  return `<td>${labelSpan}${noteBtn}</td>`;
+  return `<td>${labelSpan}</td>`;
+}
+
+function receivablesBreakdown(state, period, wi /* number or null = whole period */) {
+  const matches = (r) => {
+    const idx = weekIndexForDate(period, r.cfDate);
+    if (idx === null) return false;
+    return wi === null ? true : idx === wi;
+  };
+  const open = state.receivables.filter((r) => r.status === "open" && matches(r));
+  const paid = state.receivables.filter((r) => r.status === "paid" && r.cfDate && matches(r));
+  const totalOpen = open.reduce((a, r) => a + r.balance, 0);
+  const totalPaid = paid.reduce((a, r) => a + r.balance, 0);
+  const totalAll = totalOpen + totalPaid;
+  const pct = totalAll > 0 ? Math.round((totalPaid / totalAll) * 100) : 0;
+  return { open, paid, totalOpen, totalPaid, totalAll, pct };
+}
+
+function breakdownPopupHTML(bd, label) {
+  const rowsHtml = (list, cls) => list
+    .slice().sort((a, b) => (a.customer || "").localeCompare(b.customer || ""))
+    .map((r) => `<div class="bd-row ${cls}"><span class="bd-name">${cls === "paid" ? "✓ " : ""}${escapeHtml(r.customer)}<span class="bd-inv">${escapeHtml(r.docNumber || "")}</span></span><span class="bd-amt">${fmtMoney(r.balance)}</span></div>`)
+    .join("");
+  return `
+    <div class="bd-header">${escapeHtml(label)}</div>
+    <div class="bd-progress"><div class="bd-progress-fill" style="width:${bd.pct}%"></div></div>
+    <div class="bd-summary">${fmtMoney(bd.totalPaid)} collected of ${fmtMoney(bd.totalAll)} <span class="bd-pct">(${bd.pct}%)</span></div>
+    ${bd.paid.length ? `<div class="bd-section-label">Collected</div>${rowsHtml(bd.paid, "paid")}` : ""}
+    ${bd.open.length ? `<div class="bd-section-label">Expected</div>${rowsHtml(bd.open, "open")}` : ""}
+    ${!bd.open.length && !bd.paid.length ? `<div class="bd-empty">No invoices scheduled this week</div>` : ""}
+  `;
+}
+
+function attachBreakdownHover(td, getBreakdown, getLabel) {
+  let tip = null;
+  td.addEventListener("mouseenter", () => {
+    const bd = getBreakdown();
+    tip = document.createElement("div");
+    tip.className = "breakdown-tooltip";
+    tip.innerHTML = breakdownPopupHTML(bd, getLabel());
+    document.body.appendChild(tip);
+    const r = td.getBoundingClientRect();
+    let left = r.left + window.scrollX;
+    const maxLeft = window.scrollX + document.documentElement.clientWidth - tip.offsetWidth - 12;
+    if (left > maxLeft) left = Math.max(8, maxLeft);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${r.bottom + window.scrollY + 8}px`;
+  });
+  td.addEventListener("mouseleave", () => { tip?.remove(); tip = null; });
 }
 
 export function renderForecast(store) {
@@ -105,6 +153,9 @@ export function renderForecast(store) {
     <div class="stat-card sc-loc"><div class="label">LOC Balance</div><div class="value indigo">${fmtMoney(calc.totals.locBalance)}</div></div>
   `;
 
+  const rcBreakdowns = weeks.map((r, wi) => receivablesBreakdown(state, period, wi));
+  const rcTotalBreakdown = receivablesBreakdown(state, period, null);
+
   const table = document.getElementById("cf-grid");
   table.innerHTML = `
     <thead><tr><th>Line Item</th>${weekHeaderCells(weeksMeta)}<th>Total</th></tr></thead>
@@ -113,12 +164,12 @@ export function renderForecast(store) {
       <tr class="opening" data-row="opening">${labelCell(period, "Opening Cash", "opening", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.opening)}</td>`).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
 
       <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}">Cash Inflow</td></tr>
-      <tr class="inflow-row" data-row="receivablesCollected">${labelCell(period, "Receivables Collected", "receivablesCollected", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.receivablesCollected)}</td>`).join("")}<td>${fmtMoney(calc.totals.receivablesCollected)}</td></tr>
+      <tr class="inflow-row rc-row" data-row="receivablesCollected">${labelCell(period, "Receivables Collected", "receivablesCollected", null, true)}${weeks.map((r, wi) => `<td class="ed rc-cell" data-wi="${wi}">${fmtMoney(r.receivablesCollected)}<div class="rc-bar" title="${rcBreakdowns[wi].pct}% collected"><div class="rc-bar-fill" style="width:${rcBreakdowns[wi].pct}%"></div></div></td>`).join("")}<td class="rc-cell rc-total-cell">${fmtMoney(calc.totals.receivablesCollected)}<div class="rc-bar" title="${rcTotalBreakdown.pct}% collected"><div class="rc-bar-fill" style="width:${rcTotalBreakdown.pct}%"></div></div></td></tr>
       <tr class="inflow-row" data-row="otherInflows">${labelCell(period, "Other Inflows", "otherInflows", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.otherInflows)}</td>`).join("")}<td>${fmtMoney(calc.totals.otherInflows)}</td></tr>
       <tr class="inflow-total" data-row="totalInflows">${labelCell(period, "Total Inflows", "totalInflows", null, false)}${weeks.map((r) => `<td class="value-pos">${fmtMoney(r.totalInflows)}</td>`).join("")}<td class="value-pos">${fmtMoney(calc.totals.totalInflows)}</td></tr>
 
       <tr class="section-label sec-outflow-manual"><td colspan="${weeks.length + 2}">Cash Outflow — Manual</td></tr>
-      ${state.manualOutflowCategories.map((cat) => `
+      ${state.manualOutflowCategories.filter((c) => c !== "Payroll").map((cat) => `
         <tr class="outflow-row" data-row="manual" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "manual", cat, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.manualOutflows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.manualOutflows[cat])}</td></tr>
       `).join("")}
 
@@ -152,7 +203,7 @@ export function renderForecast(store) {
         const per = s.periods.find((p) => p.id === period.id);
         per.locOpeningBalance = val === null ? 0 : val;
       });
-    });
+    }, { title: "This is the LOC balance as of the start of week 1, before that week's draw/(repayment). Click to set it." });
   }
 
   // wire up editable cells + mark overridden + show who-badge
@@ -190,26 +241,59 @@ export function renderForecast(store) {
     });
   });
 
-  // sticky-note hover + click-to-edit on every row
-  table.querySelectorAll(".note-btn").forEach((btn) => {
-    const key = btn.dataset.key;
-    let tooltipEl = null;
-    btn.addEventListener("mouseenter", () => {
-      const text = period.notes && period.notes[key];
-      if (!text) return;
-      tooltipEl = document.createElement("div");
-      tooltipEl.className = "sticky-tooltip";
-      tooltipEl.textContent = text;
-      document.body.appendChild(tooltipEl);
-      const r = btn.getBoundingClientRect();
-      tooltipEl.style.left = `${r.left + window.scrollX}px`;
-      tooltipEl.style.top = `${r.bottom + window.scrollY + 8}px`;
+  // mini pencil + sticky note on every single cell in the grid
+  table.querySelectorAll("tbody tr[data-row]").forEach((tr) => {
+    const rowType = tr.dataset.row;
+    const cat = tr.dataset.cat || null;
+    const tds = Array.from(tr.children);
+    tds.forEach((td, idx) => {
+      const wi = idx === 0 || idx === tds.length - 1 ? (idx === 0 ? null : "total") : idx - 1;
+      attachCellPencil(td, store, period, noteKey(rowType, cat, wi));
     });
-    btn.addEventListener("mouseleave", () => { tooltipEl?.remove(); tooltipEl = null; });
-    btn.addEventListener("click", () => {
-      tooltipEl?.remove(); tooltipEl = null;
-      openNoteModal(store, period, key, btn.dataset.key);
-    });
+  });
+
+  // invoice breakdown + collection-progress hover on Receivables Collected
+  table.querySelectorAll("tr.rc-row td.rc-cell").forEach((td) => {
+    const wi = td.dataset.wi !== undefined ? Number(td.dataset.wi) : null;
+    attachBreakdownHover(
+      td,
+      () => (wi === null ? rcTotalBreakdown : rcBreakdowns[wi]),
+      () => (wi === null ? "Receivables — Full Period" : `Receivables — ${fmtDateShort(weeksMeta[wi].start)} – ${fmtDateShort(weeksMeta[wi].end)}`)
+    );
+  });
+}
+
+function attachCellPencil(td, store, period, key) {
+  const hasNote = !!(period.notes && period.notes[key]);
+  const pencil = document.createElement("button");
+  pencil.type = "button";
+  pencil.className = `cell-pencil ${hasNote ? "has-note" : ""}`;
+  pencil.innerHTML = "✎";
+  pencil.title = hasNote ? "View / edit note" : "Add a note";
+  td.appendChild(pencil);
+
+  let tooltipEl = null;
+  const showTip = () => {
+    const text = period.notes && period.notes[key];
+    if (!text) return;
+    tooltipEl = document.createElement("div");
+    tooltipEl.className = "sticky-tooltip";
+    tooltipEl.textContent = text;
+    document.body.appendChild(tooltipEl);
+    const r = pencil.getBoundingClientRect();
+    const top = r.top + window.scrollY - tooltipEl.offsetHeight - 10;
+    tooltipEl.style.left = `${Math.max(8, r.left + window.scrollX - 90)}px`;
+    tooltipEl.style.top = `${top < 0 ? r.bottom + window.scrollY + 8 : top}px`;
+  };
+  const hideTip = () => { tooltipEl?.remove(); tooltipEl = null; };
+
+  pencil.addEventListener("mouseenter", (e) => { e.stopPropagation(); showTip(); });
+  pencil.addEventListener("mouseleave", (e) => { e.stopPropagation(); hideTip(); });
+  pencil.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    hideTip();
+    openNoteModal(store, period, key);
   });
 }
 
@@ -299,14 +383,11 @@ export function renderReceivables(store) {
   const openList = state.receivables.filter((r) => r.status === "open");
   const totalAR = state.receivables.reduce((a, r) => a + r.balance, 0);
   const openAR = openList.reduce((a, r) => a + r.balance, 0);
-  const today = todayISO();
-  const overdue = openList.filter((r) => r.dueDate && r.dueDate < today).reduce((a, r) => a + r.balance, 0);
 
   document.getElementById("ar-meta").textContent = `${state.receivables.length} invoices · ${openList.length} open`;
   document.getElementById("ar-stats").innerHTML = `
     <div class="stat-card"><div class="label">Total AR</div><div class="value">${fmtMoney(totalAR)}</div></div>
     <div class="stat-card"><div class="label">Open / Uncollected</div><div class="value">${fmtMoney(openAR)}</div></div>
-    <div class="stat-card"><div class="label">Past Due</div><div class="value red">${fmtMoney(overdue)}</div></div>
     <div class="stat-card"><div class="label">Scheduled This Period</div><div class="value green">${fmtMoney(weeks.reduce((a, w) => a + openList.filter((r) => weekIndexForDate(period, r.cfDate) === w.index).reduce((s, r) => s + r.balance, 0), 0))}</div></div>
   `;
 
@@ -346,10 +427,8 @@ function renderARRows(store, period) {
   document.getElementById("ar-count").textContent = `${list.length} rows`;
   const tbody = document.getElementById("ar-tbody");
   if (!list.length) { tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><h4>No invoices here</h4>Import your Aged AR export or add one manually.</div></td></tr>`; return; }
-  const today = todayISO();
 
   tbody.innerHTML = list.map((r) => {
-    const overdue = r.status === "open" && r.dueDate && r.dueDate < today;
     const days = r.date ? Math.round((parseISO(r.cfDate || r.date) - parseISO(r.date)) / 86400000) : "";
     const whoBadge = r.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(r.lastEditBy)}">${escapeHtml(r.lastEditBy)}</span>` : "";
     return `<tr class="${r.status === "paid" ? "paid" : ""}" data-id="${r.id}">
@@ -362,7 +441,7 @@ function renderARRows(store, period) {
       <td class="mono cf-date">${r.cfDate ? fmtDate(r.cfDate) : "—"}${whoBadge}</td>
       <td class="mono">${r.age ?? "—"}${r.age ? "d" : ""}</td>
       <td class="num">${fmtMoney(r.balance)}</td>
-      <td><span class="badge ${overdue ? "overdue" : r.status}">${overdue ? "past due" : r.status}</span></td>
+      <td><span class="badge ${r.status}">${r.status}</span></td>
       <td>
         <button class="mini-btn toggle-status">${r.status === "open" ? "Mark Paid" : "Reopen"}</button>
         <button class="mini-btn del-row" style="margin-left:4px;">✕</button>
@@ -473,16 +552,14 @@ function renderAPRows(store, period) {
 
   document.getElementById("ap-count").textContent = `${list.length} rows`;
   const tbody = document.getElementById("ap-tbody");
-  if (!list.length) { tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><h4>No bills here</h4>Import your Aged AP export or add one manually.</div></td></tr>`; return; }
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><h4>No bills here</h4>Import your Aged AP export or add one manually.</div></td></tr>`; return; }
 
   tbody.innerHTML = list.map((p) => {
-    const overdue = p.status === "open" && p.dueDate && p.dueDate < todayISO();
     const whoBadge = p.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(p.lastEditBy)}">${escapeHtml(p.lastEditBy)}</span>` : "";
     return `<tr class="${p.status === "paid" ? "paid" : ""}" data-id="${p.id}">
       <td class="name">${escapeHtml(p.vendor)}</td>
       <td class="mono">${escapeHtml(p.docNumber || "")}</td>
       <td class="mono">${fmtDate(p.date)}</td>
-      <td class="mono">${fmtDate(p.dueDate)}</td>
       <td class="num">${fmtMoney(p.balance)}</td>
       <td>
         <select class="mini-select payrun-select">
@@ -490,7 +567,6 @@ function renderAPRows(store, period) {
           ${weeks.map((w) => `<option value="${w.payRun}" ${p.cfDate === w.payRun ? "selected" : ""}>${fmtDate(w.payRun)}</option>`).join("")}
         </select>${whoBadge}
       </td>
-      <td><span class="badge ${overdue ? "overdue" : p.status}">${overdue ? "past due" : p.status}</span></td>
       <td>
         <button class="mini-btn toggle-status">${p.status === "open" ? "Mark Paid" : "Reopen"}</button>
         <button class="mini-btn del-row" style="margin-left:4px;">✕</button>
@@ -529,9 +605,27 @@ export function renderFixed(store) {
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
   const categories = Array.from(new Set([...FIXED_CATEGORY_ORDER, ...state.fixedPayments.map((f) => f.category)]));
 
-  let periodTotal = 0;
+  const weeksMeta = periodWeeks(period);
+  const payrollWeeks = payrollWeeksFor(period);
+  const payrollAmt = period.payroll?.amount || 0;
+  const payrollPanel = `
+    <div class="panel fixed-group">
+      <div class="fixed-group-head">
+        <h3>Payroll <span class="count">biweekly · set per forecast at creation</span></h3>
+        <span class="total">${fmtMoney(payrollAmt)} / run</span>
+      </div>
+      <div class="fixed-item" style="grid-template-columns:1fr;">
+        <div class="fsched">${payrollAmt
+          ? `Posts as an outflow of ${fmtMoney(payrollAmt)} in: ${payrollWeeks.map((wi) => `Week ${wi + 1} (${fmtDateShort(weeksMeta[wi].start)})`).join(", ")}. To change the amount or which week it starts, edit the Payroll row directly on the CF Forecast grid — click the row label to set all 5 weeks at once, or a single cell to override just one week.`
+          : `No payroll amount set for this period yet. Set it next time you create a period, or click the Payroll row on the CF Forecast grid to enter amounts directly.`}
+        </div>
+      </div>
+    </div>
+  `;
+
+  let periodTotal = payrollWeeks.length * payrollAmt;
   const host = document.getElementById("fixed-groups");
-  host.innerHTML = categories.map((cat) => {
+  host.innerHTML = payrollPanel + categories.filter((c) => c !== "Payroll").map((cat) => {
     const items = state.fixedPayments.filter((f) => f.category === cat);
     if (!items.length) return "";
     let groupTotal = 0;
@@ -698,7 +792,7 @@ export function renderSettings(store) {
 
   // outflow categories
   const catHost = document.getElementById("outflow-categories");
-  catHost.innerHTML = state.manualOutflowCategories.map((c) => `
+  catHost.innerHTML = state.manualOutflowCategories.filter((c) => c !== "Payroll").map((c) => `
     <div class="period-row"><div class="pname">${escapeHtml(c)}</div><button class="btn-ghost del-cat" data-c="${escapeHtml(c)}">Remove</button></div>
   `).join("");
   catHost.querySelectorAll(".del-cat").forEach((b) => b.addEventListener("click", () => {
@@ -706,7 +800,9 @@ export function renderSettings(store) {
   }));
   document.getElementById("btn-add-category").onclick = () => {
     const name = prompt("New outflow category name");
-    if (name) store.mutate((s) => { if (!s.manualOutflowCategories.includes(name)) s.manualOutflowCategories.push(name); });
+    if (!name) return;
+    if (name === "Payroll") { toast("Payroll is set per-forecast now, from the New Period form.", "error"); return; }
+    store.mutate((s) => { if (!s.manualOutflowCategories.includes(name)) s.manualOutflowCategories.push(name); });
   };
 
   renderAutoScheduleTable(store, "AR", document.getElementById("ar-auto-list"));
@@ -720,7 +816,7 @@ function renderHistory(store) {
   if (!store.historyCache) { host.innerHTML = `<div class="meta">Loading…</div>`; store.loadHistory(); return; }
   const list = store.historyCache;
   if (!list.length) { host.innerHTML = `<div class="meta">No saved versions yet.</div>`; return; }
-  host.innerHTML = list.slice(0, 15).map((h) => `
+  host.innerHTML = list.slice(0, 3).map((h) => `
     <div class="period-row"><div>
       <div class="pname">Version ${h.version}</div>
       <div class="pmeta">${new Date(h.savedAt).toLocaleString()} · by ${h.savedBy}</div>
@@ -770,6 +866,18 @@ function openNewPeriodModal(store) {
     <div class="row"><label>Label</label><input id="np-label" placeholder="e.g. July 26" /></div>
     <div class="row"><label>Start Date (should be a Sunday)</label><input id="np-start" type="date" value="${today}" /></div>
     <div class="row"><label>Opening Cash</label><input id="np-open" type="number" value="0" /></div>
+    <div class="row"><label>Opening LOC Balance</label><input id="np-loc" type="number" value="0" /></div>
+    <div class="row"><label>Payroll Amount (per pay run, as a positive number — it'll post as an outflow)</label><input id="np-payroll-amt" type="number" value="0" /></div>
+    <div class="row"><label>First Payroll Falls In</label>
+      <select id="np-payroll-wk">
+        <option value="0">Week 1</option>
+        <option value="1">Week 2</option>
+        <option value="2">Week 3</option>
+        <option value="3">Week 4</option>
+        <option value="4">Week 5</option>
+      </select>
+    </div>
+    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">Payroll is biweekly — the app will automatically post the same amount every 2 weeks after the week you pick.</div>
     <div class="modal-actions"><button class="btn-ghost" id="np-cancel">Cancel</button><button class="btn-primary" id="np-save" style="width:auto;">Create</button></div>
   `, {
     onMount: (host) => {
@@ -778,10 +886,15 @@ function openNewPeriodModal(store) {
         const label = host.querySelector("#np-label").value.trim() || "New Period";
         const start = host.querySelector("#np-start").value;
         const opening = parseFloat(host.querySelector("#np-open").value || "0");
+        const loc = parseFloat(host.querySelector("#np-loc").value || "0");
+        const payrollAmt = Math.abs(parseFloat(host.querySelector("#np-payroll-amt").value || "0"));
+        const payrollWk = Number(host.querySelector("#np-payroll-wk").value || "0");
         if (!start) { toast("Pick a start date", "error"); return; }
         store.mutate((s) => {
           const p = makePeriod(uid("p"), label, start);
           p.openingCash = opening;
+          p.locOpeningBalance = loc;
+          p.payroll = { amount: payrollAmt, firstWeek: payrollWk };
           s.periods.push(p);
           s.activePeriodId = p.id;
         });

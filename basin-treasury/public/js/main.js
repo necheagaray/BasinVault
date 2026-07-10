@@ -1,10 +1,11 @@
 import * as api from "./api.js";
 import { defaultState } from "./state.js";
-import { debounce, toast, contourSVG } from "./util.js";
+import { debounce, toast, contourSVG, masterPlanSVG } from "./util.js";
 import { renderForecast, renderReceivables, renderPayables, renderFixed, renderSettings, wireImportInputs } from "./views.js";
 
 document.getElementById("login-contours").innerHTML = contourSVG(3, { w: 900, h: 700 });
 document.getElementById("topbar-contours").innerHTML = contourSVG(7, { w: 1600, h: 100 });
+document.getElementById("settings-blueprint").innerHTML = masterPlanSVG();
 
 const RENDERERS = {
   forecast: renderForecast,

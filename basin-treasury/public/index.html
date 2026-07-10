@@ -222,8 +222,8 @@
           <div class="table-scroll">
             <table class="data-table" id="ap-table">
               <thead><tr>
-                <th>Vendor</th><th>Invoice #</th><th>Date</th><th>Due</th>
-                <th class="num">Balance</th><th>Pay Run (CF Date)</th><th>Status</th><th></th>
+                <th>Vendor</th><th>Invoice #</th><th>Date</th>
+                <th class="num">Balance</th><th>Pay Run (CF Date)</th><th></th>
               </tr></thead>
               <tbody id="ap-tbody"></tbody>
             </table>
@@ -255,6 +255,7 @@
 
     <!-- ===================== SETTINGS ===================== -->
     <section class="view" id="view-settings">
+      <div class="settings-blueprint-bg" id="settings-blueprint"></div>
       <div class="page-head">
         <div><div class="eyebrow">Configuration</div><h2>Settings</h2></div>
       </div>
@@ -278,7 +279,7 @@
 
       <div class="panel settings-section">
         <h3>Version History</h3>
-        <div class="desc">Every push is snapshotted. Restore an earlier version if something goes wrong (last 30 saves are kept).</div>
+        <div class="desc">Every push is snapshotted. Restore an earlier version if something goes wrong (the 3 most recent saves are kept).</div>
         <div id="history-list"></div>
       </div>
 

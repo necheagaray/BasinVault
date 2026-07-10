@@ -1,7 +1,7 @@
 import { getStore } from "@netlify/blobs";
 import { requireAuth, json } from "./_auth.mjs";
 
-const HISTORY_CAP = 30;
+const HISTORY_CAP = 3;
 
 export default async (req) => {
   const payload = requireAuth(req);

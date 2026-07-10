@@ -262,6 +262,14 @@ body.viewer-mode #ar-auto-search, body.viewer-mode #ap-auto-search{
 main{ flex:1; padding:24px 30px 60px; max-width:2100px; width:97%; margin:0 auto; position:relative; z-index:1; }
 .view{ display:none; animation:fadeIn .18s ease; }
 .view.active{ display:block; }
+#view-settings{ position:relative; }
+.settings-blueprint-bg{
+  position:absolute; top:-24px; left:-30px; right:-30px; bottom:-40px;
+  z-index:0; opacity:0.15; pointer-events:none; overflow:hidden; border-radius:var(--radius-lg);
+  mask-image:linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.9) 12%, black 30%, black 88%, rgba(0,0,0,0.4) 100%);
+}
+.settings-blueprint-bg .master-plan-svg{ width:100%; height:100%; display:block; }
+#view-settings > *:not(.settings-blueprint-bg){ position:relative; z-index:1; }
 @keyframes fadeIn{ from{ opacity:0; transform:translateY(3px);} to{ opacity:1; transform:none;} }
 
 .page-head{ display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:18px; flex-wrap:wrap; gap:12px;}
@@ -406,17 +414,22 @@ table.cf-grid td.overridden{ box-shadow: inset 0 0 0 1px var(--brass-dim); borde
 
 .value-pos{ color:var(--green); } .value-neg{ color:var(--red); }
 
-/* row label + sticky note affordance */
-table.cf-grid td:first-child{ display:flex; align-items:center; gap:6px; }
+/* row label */
 .row-label-text{ flex:0 0 auto; }
 .row-label-text.clickable{ cursor:pointer; border-bottom:1px dashed transparent; transition:color .15s, border-color .15s; }
 .row-label-text.clickable:hover{ color:var(--brass-bright); border-bottom-color:var(--brass-dim); }
-.note-btn{
-  flex:0 0 auto; background:none; border:none; padding:0; margin-left:2px; font-size:12px; line-height:1;
-  opacity:0.28; cursor:pointer; filter:grayscale(1); transition:opacity .15s, filter .15s, transform .15s;
+
+/* mini pencil note icon, bottom-right corner of every cell */
+.cell-pencil{
+  position:absolute; right:2px; bottom:1px; z-index:2;
+  background:none; border:none; padding:1px 2px; margin:0; font-size:8.5px; line-height:1;
+  color:var(--text-dim); opacity:0; cursor:pointer;
+  transition:opacity .12s, color .12s, transform .12s;
 }
-.note-btn:hover{ opacity:1; filter:grayscale(0); transform:scale(1.15) rotate(-4deg); }
-.note-btn.has-note{ opacity:0.9; filter:grayscale(0); }
+table.cf-grid tbody tr:hover .cell-pencil{ opacity:0.4; }
+.cell-pencil:hover{ opacity:1 !important; color:var(--brass-bright); transform:scale(1.3); }
+.cell-pencil.has-note{ opacity:0.85; color:var(--brass); }
+.cell-pencil.has-note:hover{ color:var(--brass-bright); }
 
 .sticky-tooltip{
   position:absolute; z-index:500; max-width:220px; padding:12px 14px 14px;
@@ -433,6 +446,34 @@ table.cf-grid td:first-child{ display:flex; align-items:center; gap:6px; }
   background:rgba(255,255,255,0.35); border-radius:2px; transform:rotate(-8deg);
 }
 @keyframes stickyIn{ from{ opacity:0; transform:rotate(-1.5deg) translateY(-4px);} to{ opacity:1; transform:rotate(-1.5deg) translateY(0);} }
+
+/* persistent collection-progress bar under Receivables Collected */
+td.rc-cell{ padding-bottom:9px; }
+.rc-bar{ height:3px; width:100%; background:rgba(255,255,255,0.08); border-radius:2px; margin-top:6px; overflow:hidden; }
+.rc-bar-fill{ height:100%; background:var(--green); box-shadow:0 0 6px rgba(79,214,148,0.6); border-radius:2px; transition:width .25s ease; }
+
+/* invoice breakdown popup (computed, distinct from the manual yellow sticky notes) */
+.breakdown-tooltip{
+  position:absolute; z-index:500; width:270px; max-height:360px; overflow-y:auto;
+  background:linear-gradient(165deg, var(--bg-raised), var(--bg-panel-alt));
+  border:1px solid var(--line-bright); border-radius:var(--radius-md);
+  padding:14px 15px 12px; box-shadow:0 20px 40px -12px rgba(0,0,0,0.7);
+  animation:stickyIn .12s ease;
+}
+.bd-header{ font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.08em; color:var(--brass); margin-bottom:10px; }
+.bd-progress{ height:5px; width:100%; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden; margin-bottom:7px; }
+.bd-progress-fill{ height:100%; background:linear-gradient(90deg, var(--green), #7de8b3); box-shadow:0 0 8px rgba(79,214,148,0.6); }
+.bd-summary{ font-size:11.5px; color:var(--text-mid); margin-bottom:10px; }
+.bd-summary .bd-pct{ color:var(--green); font-weight:700; }
+.bd-section-label{ font-size:9.5px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); margin:8px 0 4px; }
+.bd-row{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; padding:4px 0; font-size:12px; border-bottom:1px solid var(--line); }
+.bd-row:last-child{ border-bottom:none; }
+.bd-row.paid{ color:var(--green); opacity:0.85; }
+.bd-row.open{ color:var(--text-hi); }
+.bd-name{ display:flex; flex-direction:column; }
+.bd-inv{ font-family:var(--font-mono); font-size:10px; color:var(--text-dim); }
+.bd-amt{ font-family:var(--font-mono); flex-shrink:0; }
+.bd-empty{ font-size:12px; color:var(--text-dim); padding:6px 0; }
 
 /* ===================== AR / AP TABLES ===================== */
 .toolbar{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
