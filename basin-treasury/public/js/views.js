@@ -495,47 +495,6 @@ export function renderReceivables(store) {
     });
   });
 
-  const uncPanel = document.getElementById("ar-uncertain-panel");
-  if (uncertainList.length) {
-    uncPanel.innerHTML = `
-      <div class="panel" style="margin-bottom:18px; border-color:var(--amber-dim);">
-        <div class="fixed-group-head">
-          <h3 style="color:var(--amber);">⚠ Uncertain Collections <span class="count">${uncertainList.length} invoice${uncertainList.length === 1 ? "" : "s"} · ${fmtMoney(uncertainTotal)}</span></h3>
-        </div>
-        ${uncertainList.slice().sort((a, b) => b.balance - a.balance).map((r) => `
-          <div class="fixed-item" style="grid-template-columns:1fr 100px 90px;" data-id="${r.id}">
-            <div>
-              <div class="fname">${escapeHtml(r.customer)}</div>
-              <div class="fsched">${escapeHtml(r.docNumber || "")} · invoiced ${fmtDate(r.date)}</div>
-            </div>
-            <div class="famt">${fmtMoney(r.balance)}</div>
-            <div class="factions"><button class="mini-btn resolve-uncertain">Set Date</button></div>
-          </div>
-        `).join("")}
-      </div>
-    `;
-    uncPanel.querySelectorAll(".resolve-uncertain").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.closest(".fixed-item").dataset.id;
-        const input = document.createElement("input");
-        input.type = "date"; input.className = "mini-input";
-        const cell = btn.closest(".factions");
-        cell.innerHTML = ""; cell.appendChild(input); input.focus();
-        input.addEventListener("blur", () => {
-          if (!input.value) return;
-          store.mutate((s) => {
-            const item = s.receivables.find((x) => x.id === id);
-            item.uncertain = false;
-            item.cfDate = input.value;
-            item.lastEditBy = store.initials();
-          });
-        }, { once: true });
-      });
-    });
-  } else {
-    uncPanel.innerHTML = "";
-  }
-
   document.querySelectorAll("#ar-status-tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.f === arFilter);
     b.onclick = () => { arFilter = b.dataset.f; store.render(); };
