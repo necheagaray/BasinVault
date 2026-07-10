@@ -968,12 +968,22 @@ function renderHistory(store) {
 function renderAutoScheduleTable(store, kind, host, search = "") {
   const { state } = store;
   const schedKey = kind === "AR" ? "customerAutoSchedule" : "vendorAutoSchedule";
+  const listKey = kind === "AR" ? "receivables" : "payables";
+  const groupKey = kind === "AR" ? "customer" : "vendor";
   const names = Object.keys(state[schedKey]).filter((n) => n.toLowerCase().includes(search)).sort();
   if (!names.length) { host.innerHTML = `<div class="meta" style="padding:14px;">Import ${kind === "AR" ? "receivables" : "payables"} to populate this list.</div>`; return; }
+
+  const balances = {};
+  for (const item of state[listKey]) {
+    if (item.status !== "open") continue;
+    balances[item[groupKey]] = (balances[item[groupKey]] || 0) + item.balance;
+  }
+
   host.innerHTML = names.map((name) => {
     const t = state[schedKey][name];
     return `<div class="auto-row" data-name="${escapeHtml(name)}">
       <span>${escapeHtml(name)}</span>
+      <span class="auto-balance mono">${fmtMoney(balances[name] || 0)}</span>
       <input class="mini-input days-in" type="number" value="${t.days}" />
       <span class="toggle ${t.auto ? "on" : ""}"><span class="dot"></span></span>
       <button class="mini-btn apply-now">Apply</button>

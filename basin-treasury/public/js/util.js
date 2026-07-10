@@ -114,145 +114,75 @@ export function contourSVG(seed = 1, opts = {}) {
 // scale bar and a title block, all in thin blueprint linework.
 export function masterPlanSVG() {
   const W = 1600, H = 1000;
-  const lines = [];
 
-  // faint graph-paper grid
-  for (let x = 0; x <= W; x += 40) lines.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="var(--line)" stroke-width="0.5" opacity="0.35"/>`);
-  for (let y = 0; y <= H; y += 40) lines.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="var(--line)" stroke-width="0.5" opacity="0.35"/>`);
+  // sparse, wide-spaced graph grid — barely-there texture, not a busy grid
+  const grid = [];
+  for (let x = 0; x <= W; x += 160) grid.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="var(--brass)" stroke-width="0.5" opacity="0.10"/>`);
+  for (let y = 0; y <= H; y += 160) grid.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="var(--brass)" stroke-width="0.5" opacity="0.10"/>`);
 
-  // property boundary (phantom line: long-dash / dot)
-  const boundary = `<polygon points="80,80 1500,80 1500,850 600,920 80,850" fill="none" stroke="var(--brass)" stroke-width="1.6" stroke-dasharray="26 6 3 6"/>`;
+  // property boundary — the single strongest line, traces near the page edges
+  // so it reads clearly in the margins even where panels sit on top of it
+  const boundary = `<polygon points="60,60 1540,60 1540,880 460,940 60,880" fill="none" stroke="var(--brass)" stroke-width="1.1" stroke-dasharray="22 5 2 5" opacity="0.55"/>`;
 
-  // perimeter security fence, inset
-  const fence = `<rect x="140" y="140" width="1320" height="650" fill="none" stroke="var(--cyan)" stroke-width="1" stroke-dasharray="2 5" opacity="0.6"/>`;
-
-  // buildings
-  function bldg(x, y, w, h, label, opts = {}) {
-    const dashed = opts.future ? ` stroke-dasharray="6 4"` : "";
+  // a handful of restrained building outlines, monochrome, thin hairlines only
+  function bldg(x, y, w, h, label, dashed) {
     return `
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="var(--brass)" fill-opacity="0.04" stroke="var(--brass-bright)" stroke-width="1.3"${dashed}/>
-      <text x="${x + w / 2}" y="${y + h / 2 - 4}" text-anchor="middle" font-family="var(--font-mono)" font-size="13" letter-spacing="1.5" fill="var(--brass-bright)">${label}</text>
-      ${opts.sub ? `<text x="${x + w / 2}" y="${y + h / 2 + 13}" text-anchor="middle" font-family="var(--font-mono)" font-size="9" letter-spacing="1" fill="var(--text-dim)">${opts.sub}</text>` : ""}
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="var(--brass)" stroke-width="0.9" opacity="0.45"${dashed ? ' stroke-dasharray="5 4"' : ""}/>
+      <text x="${x + 10}" y="${y + 18}" font-family="var(--font-mono)" font-size="11" letter-spacing="1.5" fill="var(--brass)" opacity="0.5">${label}</text>
     `;
   }
-
   const buildings = [
-    bldg(200, 200, 380, 220, "DATA HALL 01", { sub: "36,000 SF" }),
-    bldg(650, 200, 380, 220, "DATA HALL 02", { sub: "36,000 SF" }),
-    bldg(1100, 200, 330, 220, "DATA HALL 03", { sub: "FUTURE PHASE", future: true }),
-    bldg(200, 470, 220, 120, "ADMIN / OPS"),
-    bldg(470, 470, 140, 100, "SUBSTATION"),
-    bldg(650, 470, 260, 100, "GENERATOR YARD"),
+    bldg(140, 140, 330, 190, "DATA HALL 01"),
+    bldg(540, 140, 330, 190, "DATA HALL 02"),
+    bldg(940, 140, 290, 190, "DATA HALL 03 · FUTURE", true),
   ].join("");
 
-  // generator units inside the yard
-  const gens = [];
-  for (let i = 0; i < 6; i++) {
-    gens.push(`<rect x="${664 + i * 40}" y="500" width="26" height="46" fill="none" stroke="var(--text-dim)" stroke-width="0.8"/>`);
-  }
+  // one quiet access-road gesture, not a full road network
+  const road = `<path d="M 700 800 C 700 720, 700 680, 700 630 L 700 500 C 700 460, 740 440, 800 440 L 1250 440"
+    fill="none" stroke="var(--brass)" stroke-width="0.9" stroke-dasharray="9 6" opacity="0.4"/>`;
 
-  // cooling plant cluster
-  const cooling = [];
-  const cx0 = 1080, cy0 = 500;
-  [[0, 0], [40, 0], [80, 0], [20, 40], [60, 40]].forEach(([dx, dy]) => {
-    cooling.push(`<circle cx="${cx0 + dx}" cy="${cy0 + dy}" r="15" fill="none" stroke="var(--cyan)" stroke-width="1.2"/>`);
-  });
-  cooling.push(`<text x="${cx0 + 40}" y="${cy0 + 78}" text-anchor="middle" font-family="var(--font-mono)" font-size="11" letter-spacing="1" fill="var(--cyan)">COOLING PLANT</text>`);
-
-  // stormwater detention pond
-  const pond = `
-    <path d="M 150 700 C 130 740, 160 800, 230 810 C 300 820, 340 780, 320 740 C 300 700, 220 690, 150 700 Z"
-      fill="var(--cyan)" fill-opacity="0.05" stroke="var(--cyan)" stroke-width="1"/>
-    <text x="235" y="756" text-anchor="middle" font-family="var(--font-mono)" font-size="10" letter-spacing="0.5" fill="var(--cyan)">STORMWATER${"\u00A0"}DETENTION</text>
+  // one dimension line — a signature detail, not a full dimensioning set
+  const dim = `
+    <line x1="140" y1="105" x2="1270" y2="105" stroke="var(--brass)" stroke-width="0.7" opacity="0.4"/>
+    <line x1="140" y1="99" x2="140" y2="111" stroke="var(--brass)" stroke-width="0.7" opacity="0.4"/>
+    <line x1="1270" y1="99" x2="1270" y2="111" stroke="var(--brass)" stroke-width="0.7" opacity="0.4"/>
+    <text x="705" y="94" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--brass)" opacity="0.45">1,130'-0"</text>
   `;
 
-  // parking grid
-  const parking = [];
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 10; col++) {
-      parking.push(`<rect x="${960 + col * 24}" y="${640 + row * 46}" width="20" height="40" fill="none" stroke="var(--text-dim)" stroke-width="0.7" opacity="0.7"/>`);
-    }
-  }
-  const parkingLabel = `<text x="1080" y="800" text-anchor="middle" font-family="var(--font-mono)" font-size="11" letter-spacing="1" fill="var(--text-dim)">PARKING</text>`;
-
-  // access road (centerline, dashed) with a loop around the building cluster
-  const road = `
-    <path d="M 790 920 C 790 860, 790 830, 790 800 L 790 620 C 790 560, 850 540, 950 540 L 1350 540 C 1400 540, 1420 560, 1420 600 L 1420 700"
-      fill="none" stroke="var(--brass)" stroke-width="1" stroke-dasharray="10 6" opacity="0.8"/>
-    <circle cx="790" cy="900" r="34" fill="none" stroke="var(--brass)" stroke-width="1" stroke-dasharray="10 6" opacity="0.8"/>
-  `;
-
-  // underground conduit routing from substation to each hall
-  const conduit = `
-    <path d="M 540 470 L 540 420 L 390 420 L 390 220" fill="none" stroke="var(--violet)" stroke-width="0.9" stroke-dasharray="3 4" opacity="0.7"/>
-    <path d="M 540 470 L 540 420 L 840 420 L 840 220" fill="none" stroke="var(--violet)" stroke-width="0.9" stroke-dasharray="3 4" opacity="0.7"/>
-  `;
-
-  // dimension lines
-  function dimH(x1, x2, y, label) {
-    return `
-      <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="var(--text-dim)" stroke-width="0.8"/>
-      <line x1="${x1}" y1="${y - 6}" x2="${x1}" y2="${y + 6}" stroke="var(--text-dim)" stroke-width="0.8"/>
-      <line x1="${x2}" y1="${y - 6}" x2="${x2}" y2="${y + 6}" stroke="var(--text-dim)" stroke-width="0.8"/>
-      <text x="${(x1 + x2) / 2}" y="${y - 8}" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--text-dim)">${label}</text>
-    `;
-  }
-  function dimV(y1, y2, x, label) {
-    return `
-      <line x1="${x}" y1="${y1}" x2="${x}" y2="${y2}" stroke="var(--text-dim)" stroke-width="0.8"/>
-      <line x1="${x - 6}" y1="${y1}" x2="${x + 6}" y2="${y1}" stroke="var(--text-dim)" stroke-width="0.8"/>
-      <line x1="${x - 6}" y1="${y2}" x2="${x + 6}" y2="${y2}" stroke="var(--text-dim)" stroke-width="0.8"/>
-      <text x="${x - 10}" y="${(y1 + y2) / 2}" text-anchor="end" font-family="var(--font-mono)" font-size="10" fill="var(--text-dim)" transform="rotate(-90 ${x - 10} ${(y1 + y2) / 2})">${label}</text>
-    `;
-  }
-  const dims = dimH(80, 1500, 55, `1,420'-0"`) + dimV(80, 850, 45, `770'-0"`);
-
-  // north arrow
+  // north arrow — small, quiet
   const north = `
-    <g transform="translate(1440,130)">
-      <circle r="30" fill="none" stroke="var(--brass)" stroke-width="1"/>
-      <path d="M 0,-24 L 8,10 L 0,2 L -8,10 Z" fill="var(--brass-bright)"/>
-      <text x="0" y="24" text-anchor="middle" font-family="var(--font-mono)" font-size="11" fill="var(--brass-bright)">N</text>
+    <g transform="translate(1460,110)" opacity="0.5">
+      <circle r="22" fill="none" stroke="var(--brass)" stroke-width="0.8"/>
+      <path d="M 0,-17 L 6,7 L 0,1 L -6,7 Z" fill="var(--brass)"/>
+      <text x="0" y="18" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="var(--brass)">N</text>
     </g>
   `;
 
-  // graphic scale bar
+  // graphic scale
   const scale = `
-    <g transform="translate(120,900)">
-      <rect x="0" y="0" width="40" height="6" fill="var(--brass)" opacity="0.5"/>
-      <rect x="40" y="0" width="40" height="6" fill="none" stroke="var(--brass)" stroke-width="0.8"/>
-      <rect x="80" y="0" width="80" height="6" fill="var(--brass)" opacity="0.5"/>
-      <text x="0" y="-6" font-family="var(--font-mono)" font-size="9" fill="var(--text-dim)">0</text>
-      <text x="76" y="-6" font-family="var(--font-mono)" font-size="9" fill="var(--text-dim)">200</text>
-      <text x="152" y="-6" font-family="var(--font-mono)" font-size="9" fill="var(--text-dim)">400 FT</text>
+    <g transform="translate(90,910)" opacity="0.45">
+      <rect x="0" y="0" width="36" height="4" fill="var(--brass)"/>
+      <rect x="36" y="0" width="36" height="4" fill="none" stroke="var(--brass)" stroke-width="0.7"/>
+      <text x="0" y="-5" font-family="var(--font-mono)" font-size="8" fill="var(--brass)">0</text>
+      <text x="66" y="-5" font-family="var(--font-mono)" font-size="8" fill="var(--brass)">400 FT</text>
     </g>
   `;
 
-  // title block
+  // title block — the one place we let it read clearly, tucked in a corner
   const title = `
-    <g transform="translate(1180,870)">
-      <rect x="0" y="0" width="320" height="90" fill="var(--bg-panel)" fill-opacity="0.3" stroke="var(--brass)" stroke-width="1"/>
-      <line x1="0" y1="26" x2="320" y2="26" stroke="var(--brass)" stroke-width="0.7"/>
-      <text x="10" y="18" font-family="var(--font-display)" font-size="13" letter-spacing="1" fill="var(--brass-bright)">BASIN ENGINEERING &amp; SURVEYING</text>
-      <text x="10" y="42" font-family="var(--font-mono)" font-size="10" letter-spacing="0.5" fill="var(--text-mid)">MASTER SITE PLAN — DATA CENTER CAMPUS</text>
-      <text x="10" y="58" font-family="var(--font-mono)" font-size="9" letter-spacing="0.5" fill="var(--text-dim)">PRELIMINARY — NOT FOR CONSTRUCTION</text>
-      <text x="10" y="78" font-family="var(--font-mono)" font-size="9" fill="var(--text-dim)">SCALE 1"=200'   DWG NO. C-100</text>
+    <g transform="translate(1180,920)" opacity="0.55">
+      <line x1="0" y1="0" x2="300" y2="0" stroke="var(--brass)" stroke-width="0.7"/>
+      <text x="0" y="-24" font-family="var(--font-display)" font-size="12" letter-spacing="1" fill="var(--brass)">BASIN ENGINEERING &amp; SURVEYING</text>
+      <text x="0" y="-8" font-family="var(--font-mono)" font-size="8.5" letter-spacing="0.5" fill="var(--brass)">MASTER SITE PLAN — DATA CENTER CAMPUS — DWG C-100</text>
     </g>
   `;
 
   return `<svg class="master-plan-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
-    ${lines.join("")}
+    ${grid.join("")}
     ${boundary}
-    ${fence}
     ${buildings}
-    ${gens.join("")}
-    ${cooling.join("")}
-    ${pond}
-    ${parking.join("")}
-    ${parkingLabel}
     ${road}
-    ${conduit}
-    ${dims}
+    ${dim}
     ${north}
     ${scale}
     ${title}
