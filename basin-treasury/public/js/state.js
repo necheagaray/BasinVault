@@ -282,7 +282,84 @@ export function computeForecast(state, period) {
 
 function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
 
-/* ------------------------------ AR / AP import ------------------------------ */
+/* ------------------------------ multi-user merge ------------------------------ */
+// Two people can be editing at once. Rather than blindly overwriting the whole
+// saved blob (last-write-wins at the document level, which silently drops
+// whichever person saved first), we merge field-by-field: CF-grid overrides
+// use their own {v,by,at} timestamps, and AR/AP/Fixed-payment records use an
+// `updatedAt` stamp, so whichever edit actually happened more recently wins —
+// not whichever save request happened to land on the server last.
+
+function newerOf(a, b, getTime) {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return getTime(a) >= getTime(b) ? a : b;
+}
+
+function timeOfOverrideEntry(entry) {
+  return entry && typeof entry === "object" && entry.at ? new Date(entry.at).getTime() : 0;
+}
+
+function mergeTimestampedMap(localMap, remoteMap) {
+  localMap = localMap || {};
+  remoteMap = remoteMap || {};
+  const keys = new Set([...Object.keys(localMap), ...Object.keys(remoteMap)]);
+  const out = {};
+  for (const k of keys) out[k] = newerOf(localMap[k], remoteMap[k], timeOfOverrideEntry);
+  return out;
+}
+
+function mergeOverrides(localOv, remoteOv) {
+  localOv = localOv || {};
+  remoteOv = remoteOv || {};
+  const merged = { ...remoteOv };
+  for (const key of ["receivablesCollected", "otherInflows", "apPayables", "locDraw"]) {
+    merged[key] = mergeTimestampedMap(localOv[key], remoteOv[key]);
+  }
+  for (const key of ["manualOutflow", "fixedGroup"]) {
+    const cats = new Set([...Object.keys(localOv[key] || {}), ...Object.keys(remoteOv[key] || {})]);
+    merged[key] = {};
+    for (const cat of cats) merged[key][cat] = mergeTimestampedMap((localOv[key] || {})[cat], (remoteOv[key] || {})[cat]);
+  }
+  return merged;
+}
+
+function timeOfRecord(r) {
+  return r && r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
+}
+
+function mergeById(localArr, remoteArr) {
+  localArr = localArr || [];
+  remoteArr = remoteArr || [];
+  const byId = new Map();
+  for (const r of remoteArr) byId.set(r.id, r);
+  for (const l of localArr) byId.set(l.id, newerOf(l, byId.get(l.id), timeOfRecord));
+  return Array.from(byId.values());
+}
+
+export function mergeStates(local, remote) {
+  const merged = { ...remote };
+
+  merged.periods = remote.periods.map((rp) => {
+    const lp = local.periods.find((p) => p.id === rp.id);
+    if (!lp) return rp;
+    return { ...rp, ...lp, overrides: mergeOverrides(lp.overrides, rp.overrides), notes: { ...rp.notes, ...lp.notes } };
+  });
+  for (const lp of local.periods) {
+    if (!merged.periods.find((p) => p.id === lp.id)) merged.periods.push(lp); // period created locally, not yet on server
+  }
+
+  merged.receivables = mergeById(local.receivables, remote.receivables);
+  merged.payables = mergeById(local.payables, remote.payables);
+  merged.fixedPayments = mergeById(local.fixedPayments, remote.fixedPayments);
+
+  merged.customerAutoSchedule = { ...remote.customerAutoSchedule, ...local.customerAutoSchedule };
+  merged.vendorAutoSchedule = { ...remote.vendorAutoSchedule, ...local.vendorAutoSchedule };
+  merged.manualOutflowCategories = Array.from(new Set([...(remote.manualOutflowCategories || []), ...(local.manualOutflowCategories || [])]));
+  merged.activePeriodId = local.activePeriodId || remote.activePeriodId;
+
+  return merged;
+}
 
 export function mergeAgingImport(state, kind, parsed) {
   const listKey = kind === "AR" ? "receivables" : "payables";

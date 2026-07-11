@@ -1,4 +1,4 @@
-import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeModal, uid, todayISO, toISO, addDays, parseISO } from "./util.js";
+import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeModal, uid, todayISO, toISO, addDays, parseISO, daysBetween } from "./util.js";
 import {
   periodWeeks, computeForecast, weekIndexForDate, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor,
@@ -446,6 +446,76 @@ function setOrDel(obj, key, val) {
   else obj[key] = val;
 }
 
+/* ============================================================ ITEM-LEVEL NOTES (Receivables / Payables rows) ============================================================ */
+
+function attachItemNotePencil(td, store, listKey, id) {
+  const item = store.state[listKey].find((x) => x.id === id);
+  if (!item) return;
+  const hasNote = !!item.note;
+  const pencil = document.createElement("button");
+  pencil.type = "button";
+  pencil.className = `cell-pencil ${hasNote ? "has-note" : ""}`;
+  pencil.innerHTML = "✎";
+  pencil.title = hasNote ? "View / edit note" : "Add a note";
+  td.appendChild(pencil);
+
+  let tip = null;
+  const hideTip = () => { tip?.remove(); tip = null; };
+  pencil.addEventListener("mouseenter", (e) => {
+    e.stopPropagation();
+    if (!item.note) return;
+    tip = document.createElement("div");
+    tip.className = "sticky-tooltip";
+    tip.textContent = item.note;
+    document.body.appendChild(tip);
+    const r = pencil.getBoundingClientRect();
+    const top = r.top + window.scrollY - tip.offsetHeight - 10;
+    tip.style.left = `${Math.max(8, r.left + window.scrollX - 90)}px`;
+    tip.style.top = `${top < 0 ? r.bottom + window.scrollY + 8 : top}px`;
+  });
+  pencil.addEventListener("mouseleave", (e) => { e.stopPropagation(); hideTip(); });
+  pencil.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    hideTip();
+    openItemNoteModal(store, listKey, id);
+  });
+}
+
+function openItemNoteModal(store, listKey, id) {
+  const item = store.state[listKey].find((x) => x.id === id);
+  if (!item) return;
+  const existing = item.note || "";
+  const label = listKey === "receivables" ? item.customer : item.vendor;
+  openModal(`
+    <h3>🗒 Note — ${escapeHtml(label || "")} ${item.docNumber ? `· ${escapeHtml(item.docNumber)}` : ""}</h3>
+    <div class="row"><textarea id="note-text" rows="5" style="width:100%;background:var(--bg-panel-alt);border:1px solid var(--line);color:var(--text-hi);border-radius:6px;padding:10px;font-family:var(--font-body);font-size:13px;resize:vertical;">${escapeHtml(existing)}</textarea></div>
+    <div class="modal-actions">
+      ${existing ? `<button class="btn-ghost" id="note-del">Delete Note</button>` : ""}
+      <button class="btn-ghost" id="note-cancel">Cancel</button>
+      <button class="btn-primary" id="note-save" style="width:auto;">Save Note</button>
+    </div>
+  `, {
+    onMount: (host) => {
+      host.querySelector("#note-text").focus();
+      host.querySelector("#note-cancel").onclick = closeModal;
+      host.querySelector("#note-del")?.addEventListener("click", () => {
+        store.mutate((s) => { const rec = s[listKey].find((x) => x.id === id); if (rec) delete rec.note; });
+        closeModal();
+      });
+      host.querySelector("#note-save").onclick = () => {
+        const text = host.querySelector("#note-text").value.trim();
+        store.mutate((s) => {
+          const rec = s[listKey].find((x) => x.id === id);
+          if (!rec) return;
+          if (text) rec.note = text; else delete rec.note;
+        });
+        closeModal();
+      };
+    },
+  });
+}
+
 /* ============================================================ RECEIVABLES ============================================================ */
 
 let arFilter = "open", arSearch = "", arWeekFilter = null;
@@ -541,7 +611,7 @@ function renderARRows(store, period) {
       <td class="mono">${escapeHtml(r.poNumber || "—")}</td>
       <td><input class="mini-input days-input ${r.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the pay date is uncertain" ${r.status !== "open" ? "disabled" : ""}/></td>
       <td class="mono cf-date">${r.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (r.cfDate ? fmtDate(r.cfDate) : "—")}${whoBadge}</td>
-      <td class="mono">${r.age ?? "—"}${r.age ? "d" : ""}</td>
+      <td class="mono">${r.date ? `${daysBetween(r.date, todayISO())}d` : "—"}</td>
       <td class="num">${fmtMoney(r.balance)}</td>
       <td><span class="badge ${r.status}">${r.status}</span></td>
       <td>
@@ -555,6 +625,7 @@ function renderARRows(store, period) {
     const id = tr.dataset.id;
     const rec = state.receivables.find((x) => x.id === id);
     if (!rec) return;
+    attachItemNotePencil(tr.querySelector(".name"), store, "receivables", id);
 
     tr.querySelector(".days-input")?.addEventListener("change", (e) => {
       const raw = e.target.value.trim();
@@ -570,14 +641,14 @@ function renderARRows(store, period) {
           item.daysOverride = days;
           item.cfDate = (days === null || days === 0 || Number.isNaN(days)) ? null : toISO(addDays(item.date, days));
         }
-        item.lastEditBy = store.initials();
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
     tr.querySelector(".toggle-status")?.addEventListener("click", () => {
       store.mutate((s) => {
         const item = s.receivables.find((x) => x.id === id);
         item.status = item.status === "open" ? "paid" : "open";
-        item.lastEditBy = store.initials();
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
     tr.querySelector(".del-row")?.addEventListener("click", () => {
@@ -595,7 +666,7 @@ function renderARRows(store, period) {
           const item = s.receivables.find((x) => x.id === id);
           item.cfDate = input.value || null;
           if (input.value) item.uncertain = false;
-          item.lastEditBy = store.initials();
+          item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
         });
       }, { once: true });
     });
@@ -741,6 +812,7 @@ function renderAPRows(store, period) {
 
   tbody.querySelectorAll("tr").forEach((tr) => {
     const id = tr.dataset.id;
+    attachItemNotePencil(tr.querySelector(".name"), store, "payables", id);
     tr.querySelector(".row-select")?.addEventListener("change", (e) => {
       if (e.target.checked) apSelected.add(id); else apSelected.delete(id);
       document.getElementById("ap-count").textContent = `${list.length} rows${apSelected.size ? ` · ${apSelected.size} selected` : ""}`;
@@ -750,7 +822,7 @@ function renderAPRows(store, period) {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
         item.cfDate = e.target.value || null;
-        item.lastEditBy = store.initials();
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
     tr.querySelector(".pwp-check")?.addEventListener("change", (e) => {
@@ -758,21 +830,21 @@ function renderAPRows(store, period) {
         const item = s.payables.find((x) => x.id === id);
         item.payWhenPaid = e.target.checked;
         if (!e.target.checked) item.linkedReceivableId = null;
-        item.lastEditBy = store.initials();
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
     tr.querySelector(".pwp-receivable-select")?.addEventListener("change", (e) => {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
         item.linkedReceivableId = e.target.value || null;
-        item.lastEditBy = store.initials();
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
     tr.querySelector(".toggle-status")?.addEventListener("click", () => {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
         item.status = item.status === "open" ? "paid" : "open";
-        item.lastEditBy = store.initials();
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
     tr.querySelector(".del-row")?.addEventListener("click", () => {
@@ -904,7 +976,7 @@ export function renderFixed(store) {
     store.mutate((s) => {
       const item = s.fixedPayments.find((f) => f.id === id);
       item.active = e.target.checked;
-      item.lastEditBy = store.initials();
+      item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
     });
   }));
   host.querySelectorAll(".edit-fixed").forEach((b) => b.addEventListener("click", () => {
@@ -968,8 +1040,8 @@ function openFixedModal(store, existing) {
           active: existing.active !== false,
         };
         store.mutate((s) => {
-          if (isEdit) Object.assign(s.fixedPayments.find((f) => f.id === existing.id), payload, { lastEditBy: store.initials() });
-          else s.fixedPayments.push({ id: uid("fx"), ...payload, lastEditBy: store.initials() });
+          if (isEdit) Object.assign(s.fixedPayments.find((f) => f.id === existing.id), payload, { lastEditBy: store.initials(), updatedAt: new Date().toISOString() });
+          else s.fixedPayments.push({ id: uid("fx"), ...payload, lastEditBy: store.initials(), updatedAt: new Date().toISOString() });
         });
         closeModal();
       };

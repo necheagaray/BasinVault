@@ -442,7 +442,8 @@ table.cf-grid td.overridden{ box-shadow: inset 0 0 0 1px var(--brass-dim); borde
   color:var(--text-dim); opacity:0.28; cursor:pointer;
   transition:opacity .12s, color .12s, transform .12s;
 }
-table.cf-grid tbody tr:hover .cell-pencil{ opacity:0.55; }
+table.cf-grid tbody tr:hover .cell-pencil,
+table.data-table tbody tr:hover .cell-pencil{ opacity:0.55; }
 .cell-pencil:hover{ opacity:1 !important; color:var(--brass-bright); transform:scale(1.25); }
 .cell-pencil.has-note{ opacity:0.75; color:var(--brass); }
 .cell-pencil.has-note:hover{ opacity:1 !important; color:var(--brass-bright); }
@@ -549,6 +550,7 @@ table.data-table thead th{
   white-space:nowrap;
 }
 table.data-table tbody td{ padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap; color:var(--text-mid); }
+table.data-table td.name{ position:relative; padding-right:20px; }
 table.data-table tbody tr:hover td{ background:rgba(255,255,255,0.02); }
 table.data-table tbody tr.paid td{ opacity:0.42; }
 table.data-table td.num{ text-align:right; font-family:var(--font-mono); color:var(--text-hi); }

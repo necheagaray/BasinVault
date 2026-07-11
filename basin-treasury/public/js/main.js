@@ -1,5 +1,5 @@
 import * as api from "./api.js";
-import { defaultState } from "./state.js";
+import { defaultState, mergeStates } from "./state.js";
 import { debounce, toast, contourSVG, masterPlanSVG } from "./util.js";
 import { renderForecast, renderReceivables, renderPayables, renderFixed, renderSettings, wireImportInputs } from "./views.js";
 
@@ -61,6 +61,14 @@ const Store = {
     this.isSaving = true;
     setSyncPill("saving", "saving…");
     try {
+      // reconcile with whatever's actually on the server right now — field-level
+      // merge, not a blind overwrite, so a concurrent edit from the other person
+      // doesn't get silently discarded (and vice versa).
+      const serverNow = await api.fetchState().catch(() => null);
+      if (serverNow && this.state && serverNow.version !== this.state.version) {
+        this.state = mergeStates(this.state, serverNow);
+        this.render();
+      }
       const res = await api.saveState(this.state);
       this.state.version = res.version;
       this.state.updatedAt = res.updatedAt;
