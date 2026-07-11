@@ -249,7 +249,7 @@ body.viewer-mode .rename-period,
 body.viewer-mode .del-period,
 body.viewer-mode .del-cat,
 body.viewer-mode .restore-snap{
-  pointer-events:none !important; opacity:0.45 !important; cursor:default !important;
+  pointer-events:none !important; cursor:default !important;
 }
 body.viewer-mode #ar-auto-search, body.viewer-mode #ap-auto-search{
   pointer-events:auto !important; opacity:1 !important;
