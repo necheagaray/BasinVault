@@ -127,7 +127,15 @@ input, select, textarea{ font-family:var(--font-body); }
   100%{ background-position:0% 50%; }
 }
 .vault-name{
+  font-family:'Oswald', var(--font-display); font-weight:700; text-transform:uppercase;
   font-size:40px; letter-spacing:0.09em; line-height:1;
+  background:linear-gradient(105deg,
+    #6b4e1e 0%, #8a6a2c 10%, #d9b568 22%, #fff6da 32%, #f3dc9c 40%,
+    #b8863c 50%, #6b4e1e 58%, #d9b568 70%, #fff6da 80%, #b8863c 90%, #6b4e1e 100%);
+  background-size:220% 100%;
+  -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent;
+  filter:drop-shadow(0 2px 0 rgba(0,0,0,0.55)) drop-shadow(0 1px 0 rgba(255,241,209,0.25)) drop-shadow(0 4px 10px rgba(0,0,0,0.5));
+  animation:goldShine 7s ease-in-out infinite;
 }
 .vault-name-sub{
   font-family:var(--font-mono); font-size:12px; letter-spacing:0.34em; text-transform:uppercase;

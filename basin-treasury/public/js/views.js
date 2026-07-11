@@ -985,29 +985,32 @@ export function renderFixed(store) {
   const payrollWeeks = payrollWeeksFor(period);
   const payrollAmt = period.payroll?.amount || 0;
   const k401Amt = period.k401?.amount || 0;
+  const payrollWeekLabel = payrollWeeks.map((wi) => `Wk ${wi + 1}`).join(", ");
   const payrollPanel = `
     <div class="panel fixed-group">
       <div class="fixed-group-head">
-        <h3>Payroll <span class="count">biweekly · set per forecast at creation</span></h3>
-        <span class="total">${fmtMoney(payrollAmt)} / run</span>
+        <h3>Payroll <span class="count">biweekly</span></h3>
+        <span class="total">${fmtMoney(payrollWeeks.length * payrollAmt)} this period</span>
       </div>
-      <div class="fixed-item" style="grid-template-columns:1fr;">
-        <div class="fsched">${payrollAmt
-          ? `Posts as an outflow of ${fmtMoney(payrollAmt)} in: ${payrollWeeks.map((wi) => `Week ${wi + 1} (${fmtDateShort(weeksMeta[wi].start)})`).join(", ")}. To change the amount or which week it starts, edit the Payroll row directly on the CF Forecast grid — click the row label to set all 5 weeks at once, or a single cell to override just one week.`
-          : `No payroll amount set for this period yet. Set it next time you create a period, or click the Payroll row on the CF Forecast grid to enter amounts directly.`}
+      <div class="fixed-item" style="grid-template-columns:1fr 120px;">
+        <div>
+          <div class="fname">Payroll</div>
+          <div class="fsched">${payrollAmt ? `${payrollWeekLabel}` : "Not set — create a new period to set it"}</div>
         </div>
+        <div class="famt">${fmtMoney(payrollAmt)}<div class="fsched">per run</div></div>
       </div>
     </div>
     <div class="panel fixed-group">
       <div class="fixed-group-head">
-        <h3>401K <span class="count">biweekly · same weeks as Payroll</span></h3>
-        <span class="total">${fmtMoney(k401Amt)} / run</span>
+        <h3>401K <span class="count">biweekly</span></h3>
+        <span class="total">${fmtMoney(payrollWeeks.length * k401Amt)} this period</span>
       </div>
-      <div class="fixed-item" style="grid-template-columns:1fr;">
-        <div class="fsched">${k401Amt
-          ? `Posts as an outflow of ${fmtMoney(k401Amt)} on the same weeks as Payroll: ${payrollWeeks.map((wi) => `Week ${wi + 1} (${fmtDateShort(weeksMeta[wi].start)})`).join(", ")}. Edit the 401K row directly on the CF Forecast grid to change it.`
-          : `No 401K amount set for this period yet. Set it next time you create a period, or click the 401K row on the CF Forecast grid to enter amounts directly.`}
+      <div class="fixed-item" style="grid-template-columns:1fr 120px;">
+        <div>
+          <div class="fname">401K</div>
+          <div class="fsched">${k401Amt ? `${payrollWeekLabel}` : "Not set — create a new period to set it"}</div>
         </div>
+        <div class="famt">${fmtMoney(k401Amt)}<div class="fsched">per run</div></div>
       </div>
     </div>
   `;
@@ -1046,7 +1049,6 @@ export function renderFixed(store) {
   }).join("") + `<div class="panel fixed-group"><div class="fixed-group-head"><h3>New Category</h3>
       <button class="btn-ghost" id="add-fixed-new-cat">+ Add Item In New Category</button></div></div>`;
 
-  document.getElementById("fixed-period-total").textContent = fmtMoney(periodTotal);
 
   host.querySelectorAll(".add-fixed").forEach((b) => b.addEventListener("click", () => openFixedModal(store, { category: b.dataset.cat })));
   document.getElementById("add-fixed-new-cat").addEventListener("click", () => openFixedModal(store, {}));
