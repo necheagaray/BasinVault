@@ -1,7 +1,7 @@
 import * as api from "./api.js";
 import { defaultState, mergeStates } from "./state.js";
 import { debounce, toast, contourSVG, masterPlanSVG } from "./util.js";
-import { renderForecast, renderReceivables, renderPayables, renderFixed, renderSettings, wireImportInputs } from "./views.js";
+import { renderForecast, renderReceivables, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
 
 document.getElementById("login-contours").innerHTML = contourSVG(3, { w: 900, h: 700 });
 document.getElementById("topbar-contours").innerHTML = contourSVG(7, { w: 1600, h: 100 });
@@ -48,6 +48,7 @@ const Store = {
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${this.activeView}`));
     document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === this.activeView));
     RENDERERS[this.activeView](this);
+    requestAnimationFrame(syncStickyOffsets);
   },
 
   scheduleSave: debounce(function () { Store.pushNow(); }, 1400),
@@ -167,6 +168,7 @@ async function boot() {
 function startPolling() {
   setInterval(() => Store.pullNow({ silent: true }), 20000);
   window.addEventListener("focus", () => Store.pullNow({ silent: true }));
+  window.addEventListener("resize", debounce(() => syncStickyOffsets(), 150));
 }
 
 function showLogin() {

@@ -541,6 +541,10 @@ export function renderReceivables(store) {
     <div class="stat-card sc-unc"><div class="label">Uncertain</div><div class="value amber">${fmtMoney(uncertainTotal)}</div></div>
   `;
 
+  const insightsHost = document.getElementById("ar-insights");
+  insightsHost.innerHTML = `<button type="button" class="insight-btn" id="ar-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>`;
+  document.getElementById("ar-insight-customers").onclick = () => openTopCustomersModal(openList);
+
   const collectRow = document.getElementById("ar-collect-row");
   collectRow.innerHTML = weeks.map((w) => {
     const bd = receivablesBreakdown(state, period, w.index);
@@ -584,6 +588,22 @@ export function renderReceivables(store) {
   };
 
   renderARRows(store, period);
+}
+
+function openTopCustomersModal(openList) {
+  const byCustomer = {};
+  for (const r of openList) byCustomer[r.customer] = (byCustomer[r.customer] || 0) + r.balance;
+  const ranked = Object.entries(byCustomer).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const rows = ranked.map(([c, amt], i) => `
+    <div class="vendor-rank"><span><span class="n">${i + 1}</span>${escapeHtml(c)}</span><span class="amt">${fmtMoney(amt)}</span></div>
+  `).join("") || `<div class="meta">No open receivables yet.</div>`;
+  openModal(`
+    <button type="button" class="modal-close-x" id="insight-close">✕</button>
+    <h3>🏆 Top 5 Customer Balances</h3>
+    ${rows}
+  `, {
+    onMount: (host) => { host.querySelector("#insight-close").onclick = closeModal; },
+  });
 }
 
 function renderARRows(store, period) {
@@ -726,33 +746,61 @@ export function renderPayables(store) {
 
   document.getElementById("ap-copy-btn").onclick = () => copyPayablesToClipboard(state, period);
 
-  // pay run totals — clickable to filter, same as the dropdown
-  const payrunHost = document.getElementById("ap-payrun-totals");
-  payrunHost.innerHTML = weeks.map((w) => {
-    const total = openList.filter((p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === w.index).reduce((a, p) => a + p.balance, 0);
-    const count = openList.filter((p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === w.index).length;
+  // insight buttons — Pay Run Totals + Top Vendor Balances, now popup modals instead of a side panel
+  const insightsHost = document.getElementById("ap-insights");
+  insightsHost.innerHTML = `
+    <button type="button" class="insight-btn" id="ap-insight-payrun"><span class="icon">📅</span>Pay Run Totals<span class="arrow">▸</span></button>
+    <button type="button" class="insight-btn" id="ap-insight-vendors"><span class="icon">🏆</span>Top Vendor Balances<span class="arrow">▸</span></button>
+  `;
+  document.getElementById("ap-insight-payrun").onclick = () => openPayrunTotalsModal(store, period, weeks, openList);
+  document.getElementById("ap-insight-vendors").onclick = () => openTopVendorsModal(openList);
+
+  renderAPRows(store, period);
+}
+
+function openPayrunTotalsModal(store, period, weeks, openList) {
+  const rows = weeks.map((w) => {
+    const total = openList.filter((p) => weekIndexForDate(period, effectivePayableDate(store.state, period, p)) === w.index).reduce((a, p) => a + p.balance, 0);
+    const count = openList.filter((p) => weekIndexForDate(period, effectivePayableDate(store.state, period, p)) === w.index).length;
     const active = apPayrunFilter === w.payRun;
     return `<button type="button" class="vendor-rank payrun-filter-btn ${active ? "active" : ""}" data-payrun="${w.payRun}" title="Click to filter the table to this pay run">
       <span><span class="filter-icon">⏷</span>${fmtDate(w.payRun)} <span style="color:var(--text-dim)">(${count})</span></span><span class="amt">${fmtMoney(total)}</span>
     </button>`;
   }).join("");
-  payrunHost.querySelectorAll(".payrun-filter-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const val = btn.dataset.payrun;
-      apPayrunFilter = apPayrunFilter === val ? "" : val;
-      renderPayables(store);
-    });
+  openModal(`
+    <button type="button" class="modal-close-x" id="insight-close">✕</button>
+    <h3>📅 Pay Run Totals</h3>
+    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">Click a pay run to filter the table to it.</div>
+    ${rows}
+  `, {
+    onMount: (host) => {
+      host.querySelector("#insight-close").onclick = closeModal;
+      host.querySelectorAll(".payrun-filter-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const val = btn.dataset.payrun;
+          apPayrunFilter = apPayrunFilter === val ? "" : val;
+          closeModal();
+          renderPayables(store);
+        });
+      });
+    },
   });
+}
 
-  // top vendor balances
+function openTopVendorsModal(openList) {
   const byVendor = {};
   for (const p of openList) byVendor[p.vendor] = (byVendor[p.vendor] || 0) + p.balance;
-  const ranked = Object.entries(byVendor).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  document.getElementById("ap-vendor-rank").innerHTML = ranked.map(([v, amt], i) => `
+  const ranked = Object.entries(byVendor).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const rows = ranked.map(([v, amt], i) => `
     <div class="vendor-rank"><span><span class="n">${i + 1}</span>${escapeHtml(v)}</span><span class="amt">${fmtMoney(amt)}</span></div>
   `).join("") || `<div class="meta">No open payables yet.</div>`;
-
-  renderAPRows(store, period);
+  openModal(`
+    <button type="button" class="modal-close-x" id="insight-close">✕</button>
+    <h3>🏆 Top 5 Vendor Balances</h3>
+    ${rows}
+  `, {
+    onMount: (host) => { host.querySelector("#insight-close").onclick = closeModal; },
+  });
 }
 
 function renderAPRows(store, period) {
@@ -898,6 +946,35 @@ async function copyPayablesToClipboard(state, period) {
 }
 
 /* ============================================================ FIXED PAYMENTS ============================================================ */
+
+/* ============================================================ STICKY OFFSET SYNC ============================================================ */
+// The page itself is the only scroll container now (no nested scroll panes).
+// Each view's "frozen head" (title + stats + filters) is pinned with position:sticky,
+// and the table's own header needs to sit right below it — measured at render time
+// since the frozen block's height varies by content/viewport width.
+export function syncStickyOffsets() {
+  const applyOffset = (frozenId, tableSelector) => {
+    const frozen = document.getElementById(frozenId);
+    const table = document.querySelector(tableSelector);
+    if (!frozen || !table) return;
+    const h = Math.ceil(frozen.getBoundingClientRect().height);
+    table.style.setProperty("--sticky-top", `${h}px`);
+  };
+  applyOffset("forecast-frozen-head", "#cf-grid");
+  applyOffset("ar-frozen-head", "#ar-table");
+
+  const apFrozen = document.getElementById("ap-frozen-head");
+  const apToolbar = document.getElementById("ap-toolbar");
+  const apTable = document.getElementById("ap-table");
+  if (apFrozen && apToolbar) {
+    const frozenH = Math.ceil(apFrozen.getBoundingClientRect().height);
+    apToolbar.style.top = `${frozenH}px`;
+    if (apTable) {
+      const toolbarH = Math.ceil(apToolbar.getBoundingClientRect().height);
+      apTable.style.setProperty("--sticky-top", `${frozenH + toolbarH}px`);
+    }
+  }
+}
 
 export function renderFixed(store) {
   const { state } = store;
