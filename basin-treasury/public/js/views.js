@@ -349,6 +349,7 @@ function attachCellPencil(td, store, period, key) {
 
   let tooltipEl = null;
   const showTip = () => {
+    document.querySelectorAll(".breakdown-tooltip").forEach((el) => el.remove()); // pencil note takes priority over the cell's breakdown popup
     const text = period.notes && period.notes[key];
     if (!text) return;
     tooltipEl = document.createElement("div");
