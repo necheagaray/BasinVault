@@ -500,7 +500,7 @@ function openItemNoteModal(store, listKey, id) {
       host.querySelector("#note-text").focus();
       host.querySelector("#note-cancel").onclick = closeModal;
       host.querySelector("#note-del")?.addEventListener("click", () => {
-        store.mutate((s) => { const rec = s[listKey].find((x) => x.id === id); if (rec) delete rec.note; });
+        store.mutate((s) => { const rec = s[listKey].find((x) => x.id === id); if (rec) { delete rec.note; rec.updatedAt = new Date().toISOString(); } });
         closeModal();
       });
       host.querySelector("#note-save").onclick = () => {
@@ -509,6 +509,7 @@ function openItemNoteModal(store, listKey, id) {
           const rec = s[listKey].find((x) => x.id === id);
           if (!rec) return;
           if (text) rec.note = text; else delete rec.note;
+          rec.updatedAt = new Date().toISOString();
         });
         closeModal();
       };

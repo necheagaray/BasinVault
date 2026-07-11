@@ -44,6 +44,7 @@ const Store = {
   },
 
   render() {
+    document.querySelectorAll(".sticky-tooltip, .breakdown-tooltip").forEach((el) => el.remove());
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${this.activeView}`));
     document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === this.activeView));
     RENDERERS[this.activeView](this);
