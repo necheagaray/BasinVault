@@ -521,6 +521,13 @@ function openItemNoteModal(store, listKey, id) {
 /* ============================================================ RECEIVABLES ============================================================ */
 
 let arFilter = "open", arSearch = "", arWeekFilter = null;
+let arSortBy = "customer", arSortDir = "asc";
+
+// sorts by the letters in a name only — ignores job/invoice numbers, dashes,
+// colons, etc. that NetSuite often appends to a customer name
+function customerSortKey(name) {
+  return (name || "").replace(/[^a-zA-Z\s]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+}
 
 export function renderReceivables(store) {
   const { state } = store;
@@ -654,7 +661,24 @@ function renderARRows(store, period) {
   if (arFilter === "paid") list = list.filter((r) => r.status === "paid");
   if (arSearch) list = list.filter((r) => `${r.customer} ${r.docNumber} ${r.poNumber || ""}`.toLowerCase().includes(arSearch));
   if (arWeekFilter !== null) list = list.filter((r) => weekIndexForDate(period, r.cfDate) === arWeekFilter);
-  list = list.slice().sort((a, b) => (a.customer || "").localeCompare(b.customer || "") || (a.date || "").localeCompare(b.date || ""));
+  list = list.slice().sort((a, b) => {
+    let cmp;
+    if (arSortBy === "date") cmp = (a.date || "").localeCompare(b.date || "");
+    else cmp = customerSortKey(a.customer).localeCompare(customerSortKey(b.customer));
+    if (cmp === 0) cmp = customerSortKey(a.customer).localeCompare(customerSortKey(b.customer)) || (a.date || "").localeCompare(b.date || "");
+    return arSortDir === "desc" ? -cmp : cmp;
+  });
+
+  document.querySelectorAll('#ar-table th.sortable').forEach((th) => {
+    const arrow = th.querySelector(".sort-arrow");
+    if (th.dataset.sort === arSortBy) { arrow.textContent = arSortDir === "asc" ? "▲" : "▼"; th.classList.add("sorted"); }
+    else { arrow.textContent = ""; th.classList.remove("sorted"); }
+    th.onclick = () => {
+      if (arSortBy === th.dataset.sort) arSortDir = arSortDir === "asc" ? "desc" : "asc";
+      else { arSortBy = th.dataset.sort; arSortDir = "asc"; }
+      renderARRows(store, period);
+    };
+  });
 
   const weekLabel = arWeekFilter !== null ? ` · week of ${fmtDate(periodWeeks(period)[arWeekFilter].start)} <button id="ar-week-clear" class="mini-btn" style="margin-left:6px;">✕ clear</button>` : "";
   document.getElementById("ar-count").innerHTML = `${list.length} rows${weekLabel}`;
@@ -728,6 +752,7 @@ function renderARRows(store, period) {
       input.value = rec.cfDate || "";
       const td = tr.querySelector(".cf-date");
       td.innerHTML = ""; td.appendChild(input); input.focus();
+      if (input.showPicker) { try { input.showPicker(); } catch { /* ignore */ } }
       input.addEventListener("blur", () => {
         store.mutate((s) => {
           const item = s.receivables.find((x) => x.id === id);
