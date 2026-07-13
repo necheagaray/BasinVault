@@ -374,18 +374,24 @@ export function mergeAgingImport(state, kind, parsed) {
     seen.add(key);
     const existing = list.find((x) => `${x[groupKey]}::${x.docNumber}::${x.date}` === key);
     if (existing) {
-      existing.balance = rec.balance;
+      // once a partial payment has been recorded locally, this app is the source of
+      // truth for the remaining balance — a fresh import shouldn't silently undo it
+      const hasLocalPayments = existing.payments && existing.payments.length > 0;
+      if (!hasLocalPayments) existing.balance = rec.balance;
+      if (existing.originalBalance === undefined) existing.originalBalance = rec.balance;
       existing.dueDate = rec.dueDate;
       existing.age = rec.age;
       existing.txnType = rec.txnType;
       if (kind === "AR") existing.poNumber = rec.poNumber;
-      if (existing.status !== "open") { existing.status = "open"; }
+      if (existing.balance > 0 && existing.status !== "open") existing.status = "open";
       updated++;
     } else {
       const tmpl = state[schedKey][rec[groupKey]];
       const item = {
         id: uid(kind.toLowerCase()),
         ...rec,
+        originalBalance: rec.balance,
+        payments: [],
         status: "open",
         cfDate: tmpl?.auto && rec.date ? toISO(addDays(rec.date, tmpl.days || 0)) : null,
         daysOverride: null,

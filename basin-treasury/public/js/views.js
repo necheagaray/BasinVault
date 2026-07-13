@@ -590,6 +590,47 @@ export function renderReceivables(store) {
   renderARRows(store, period);
 }
 
+function openRecordPaymentModal(store, id) {
+  const rec = store.state.receivables.find((x) => x.id === id);
+  if (!rec) return;
+  const paidSoFar = (rec.payments || []).reduce((a, p) => a + p.amount, 0);
+  openModal(`
+    <button type="button" class="modal-close-x" id="pay-close">✕</button>
+    <h3>💲 Record Payment</h3>
+    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:14px;">${escapeHtml(rec.customer)} · ${escapeHtml(rec.docNumber || "")}<br/>Balance due: <strong style="color:var(--text-hi);">${fmtMoney(rec.balance)}</strong>${paidSoFar ? ` · ${fmtMoney(paidSoFar)} already paid` : ""}</div>
+    <div class="row"><label>Payment Amount</label><input id="pay-amt" type="number" value="${rec.balance}" step="0.01" /></div>
+    <div class="row"><label>Payment Date</label><input id="pay-date" type="date" value="${todayISO()}" /></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="pay-cancel">Cancel</button>
+      <button class="btn-primary" id="pay-save" style="width:auto;">Record Payment</button>
+    </div>
+  `, {
+    onMount: (host) => {
+      host.querySelector("#pay-amt").focus();
+      host.querySelector("#pay-amt").select();
+      host.querySelector("#pay-close").onclick = closeModal;
+      host.querySelector("#pay-cancel").onclick = closeModal;
+      host.querySelector("#pay-save").onclick = () => {
+        const amt = parseFloat(host.querySelector("#pay-amt").value || "0");
+        const date = host.querySelector("#pay-date").value || todayISO();
+        if (!amt || amt <= 0) { toast("Enter a payment amount greater than $0", "error"); return; }
+        store.mutate((s) => {
+          const item = s.receivables.find((x) => x.id === id);
+          if (!item) return;
+          item.payments = item.payments || [];
+          item.payments.push({ date, amount: amt });
+          item.balance = Math.max(0, Math.round((item.balance - amt) * 100) / 100);
+          if (item.balance <= 0) { item.balance = 0; item.status = "paid"; }
+          item.lastEditBy = store.initials();
+          item.updatedAt = new Date().toISOString();
+        });
+        closeModal();
+        toast(`Recorded ${fmtMoney(amt)} payment${amt >= rec.balance ? " — invoice paid in full" : ""}`, "success");
+      };
+    },
+  });
+}
+
 function openTopCustomersModal(openList) {
   const byCustomer = {};
   for (const r of openList) byCustomer[r.customer] = (byCustomer[r.customer] || 0) + r.balance;
@@ -625,6 +666,8 @@ function renderARRows(store, period) {
     const days = r.date ? Math.round((parseISO(r.cfDate || r.date) - parseISO(r.date)) / 86400000) : "";
     const whoBadge = r.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(r.lastEditBy)}">${escapeHtml(r.lastEditBy)}</span>` : "";
     const daysVal = r.uncertain ? "unc" : (r.daysOverride ?? days);
+    const paidSoFar = (r.payments || []).reduce((a, p) => a + p.amount, 0);
+    const hasPartial = paidSoFar > 0 && r.balance > 0;
     return `<tr class="${r.status === "paid" ? "paid" : ""} ${r.uncertain ? "uncertain-row" : ""}" data-id="${r.id}">
       <td class="name">${escapeHtml(r.customer)}</td>
       <td>${escapeHtml(r.txnType || "")}</td>
@@ -634,10 +677,11 @@ function renderARRows(store, period) {
       <td><input class="mini-input days-input ${r.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the pay date is uncertain" ${r.status !== "open" ? "disabled" : ""}/></td>
       <td class="mono cf-date">${r.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (r.cfDate ? fmtDate(r.cfDate) : "—")}${whoBadge}</td>
       <td class="mono">${r.date ? `${daysBetween(r.date, todayISO())}d` : "—"}</td>
-      <td class="num">${fmtMoney(r.balance)}</td>
+      <td class="num">${fmtMoney(r.balance)}${hasPartial ? `<div class="partial-note">${fmtMoney(paidSoFar)} paid of ${fmtMoney(r.originalBalance ?? r.balance)}</div>` : ""}</td>
       <td><span class="badge ${r.status}">${r.status}</span></td>
       <td>
-        <button class="mini-btn toggle-status">${r.status === "open" ? "Mark Paid" : "Reopen"}</button>
+        ${r.status === "open" ? `<button class="mini-btn record-payment" title="Record a partial or full payment">💲 Pay</button>` : ""}
+        <button class="mini-btn toggle-status" style="margin-left:4px;">${r.status === "open" ? "Mark Paid" : "Reopen"}</button>
         <button class="mini-btn del-row" style="margin-left:4px;">✕</button>
       </td>
     </tr>`;
@@ -649,6 +693,7 @@ function renderARRows(store, period) {
     if (!rec) return;
     attachItemNotePencil(tr.querySelector(".name"), store, "receivables", id);
 
+    tr.querySelector(".record-payment")?.addEventListener("click", () => openRecordPaymentModal(store, id));
     tr.querySelector(".days-input")?.addEventListener("change", (e) => {
       const raw = e.target.value.trim();
       store.mutate((s) => {
@@ -909,21 +954,43 @@ function renderAPRows(store, period) {
 async function copyPayablesToClipboard(state, period) {
   const selected = state.payables.filter((p) => apSelected.has(p.id));
   if (!selected.length) { toast("Select at least one row first (checkboxes on the left)", "error"); return; }
-  selected.sort((a, b) => (a.vendor || "").localeCompare(b.vendor || "") || (a.date || "").localeCompare(b.date || ""));
-  const header = ["Vendor", "Invoice #", "Date", "Balance", "Pay Run"].join("\t");
-  const rows = selected.map((p) => {
-    const eff = effectivePayableDate(state, period, p);
-    return [
-      p.vendor || "",
-      p.docNumber || "",
-      p.date ? fmtDate(p.date) : "",
-      p.balance,
-      eff ? `${fmtDate(eff)}${p.payWhenPaid ? " (PWP)" : ""}` : "Unscheduled",
-    ].join("\t");
-  });
-  const text = [header, ...rows].join("\n");
 
-  const done = () => toast(`Copied ${selected.length} payable${selected.length === 1 ? "" : "s"} to clipboard — paste into Excel, Slack, or email`, "success", 4500);
+  const byVendor = {};
+  for (const p of selected) (byVendor[p.vendor] = byVendor[p.vendor] || []).push(p);
+  const vendors = Object.keys(byVendor).sort((a, b) => a.localeCompare(b));
+
+  const lines = [];
+  lines.push("PAYMENT SCHEDULE");
+  lines.push(`Generated ${fmtDate(todayISO())} · ${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${vendors.length} vendor${vendors.length === 1 ? "" : "s"}`);
+  lines.push("");
+  lines.push(["Vendor", "Invoice #", "Date", "Balance", "Pay Run"].join("\t"));
+
+  let grandTotal = 0;
+  vendors.forEach((v, vi) => {
+    const invoices = byVendor[v].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const vendorTotal = invoices.reduce((a, p) => a + p.balance, 0);
+    grandTotal += vendorTotal;
+
+    lines.push([`${v} — VENDOR TOTAL`, "", "", vendorTotal, `${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`].join("\t"));
+    for (const p of invoices) {
+      const eff = effectivePayableDate(state, period, p);
+      lines.push([
+        "",
+        p.docNumber || "",
+        p.date ? fmtDate(p.date) : "",
+        p.balance,
+        eff ? `${fmtDate(eff)}${p.payWhenPaid ? " (PWP)" : ""}` : "Unscheduled",
+      ].join("\t"));
+    }
+    if (vi < vendors.length - 1) lines.push(""); // blank spacer row between vendor groups
+  });
+
+  lines.push("");
+  lines.push(["GRAND TOTAL", "", "", grandTotal, `${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${vendors.length} vendor${vendors.length === 1 ? "" : "s"}`].join("\t"));
+
+  const text = lines.join("\n");
+
+  const done = () => toast(`Copied payment schedule — ${selected.length} invoice${selected.length === 1 ? "" : "s"} across ${vendors.length} vendor${vendors.length === 1 ? "" : "s"} — paste into Excel, Slack, or email`, "success", 5000);
 
   try {
     await navigator.clipboard.writeText(text);
@@ -1329,7 +1396,7 @@ function openManualInvoiceModal(store, kind) {
         if (!group || !date) { toast("Fill in the required fields", "error"); return; }
         store.mutate((s) => {
           if (isAR) {
-            s.receivables.push({ id: uid("ar"), customer: group, txnType: "Invoice", date, docNumber: doc, poNumber: host.querySelector("#m-po").value.trim(), dueDate: null, age: 0, balance: bal, status: "open", cfDate: null, daysOverride: null, source: "manual" });
+            s.receivables.push({ id: uid("ar"), customer: group, txnType: "Invoice", date, docNumber: doc, poNumber: host.querySelector("#m-po").value.trim(), dueDate: null, age: 0, balance: bal, originalBalance: bal, payments: [], status: "open", cfDate: null, daysOverride: null, source: "manual" });
             if (!s.customerAutoSchedule[group]) s.customerAutoSchedule[group] = { days: 30, auto: false };
           } else {
             s.payables.push({ id: uid("ap"), vendor: group, txnType: "Bill", date, docNumber: doc, dueDate: host.querySelector("#m-due").value || null, age: 0, balance: bal, status: "open", cfDate: null, source: "manual" });

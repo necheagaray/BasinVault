@@ -673,6 +673,9 @@ table.data-table td.name{ color:var(--text-hi); font-weight:500; }
   background:var(--amber-dim); border:1px solid rgba(224,168,63,0.4); border-radius:10px; padding:2px 8px;
 }
 tr.uncertain-row td{ background:rgba(224,168,63,0.035); }
+.partial-note{
+  font-size:9.5px; color:var(--green); font-weight:500; margin-top:2px; white-space:nowrap;
+}
 .mini-select{
   background:var(--bg-deep); border:1px solid var(--line-bright); color:var(--text-hi);
   padding:5px 7px; border-radius:3px; font-family:var(--font-mono); font-size:12.5px; font-weight:600;
