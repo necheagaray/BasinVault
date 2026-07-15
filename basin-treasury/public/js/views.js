@@ -164,6 +164,31 @@ function attachBreakdownHover(td, getBreakdown, getLabel, buildHTML = breakdownP
   td.addEventListener("mouseleave", () => { tip?.remove(); tip = null; });
 }
 
+// click-to-open version — used on the CF Forecast grid, where the hover tooltip
+// was too easy to accidentally dismiss. A small icon (separate from the cell's
+// own click-to-edit-amount behavior) opens a proper scrollable modal that only
+// closes via the X button, not by clicking outside it.
+function attachBreakdownClick(td, getBreakdown, getLabel, buildHTML = breakdownPopupHTML) {
+  const icon = document.createElement("button");
+  icon.type = "button";
+  icon.className = "cell-detail-btn";
+  icon.innerHTML = "🔍";
+  icon.title = "Click for a breakdown of this amount";
+  td.appendChild(icon);
+  icon.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const bd = getBreakdown();
+    openModal(`
+      <button type="button" class="modal-close-x" id="bd-close">✕</button>
+      <div class="breakdown-modal-body">${buildHTML(bd, getLabel())}</div>
+    `, {
+      closeOnBackdrop: false,
+      onMount: (host) => { host.querySelector("#bd-close").onclick = closeModal; },
+    });
+  });
+}
+
 export function renderForecast(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
@@ -302,17 +327,17 @@ export function renderForecast(store) {
     });
   });
 
-  // invoice breakdown + collection-progress hover on Receivables Collected
+  // invoice breakdown + collection-progress on Receivables Collected — click the 🔍 icon
   table.querySelectorAll("tr.rc-row td.rc-cell").forEach((td) => {
     const wi = td.dataset.wi !== undefined ? Number(td.dataset.wi) : null;
-    attachBreakdownHover(
+    attachBreakdownClick(
       td,
       () => (wi === null ? rcTotalBreakdown : rcBreakdowns[wi]),
       () => (wi === null ? "Receivables — Full Period" : `Receivables — ${fmtDateShort(weeksMeta[wi].start)} – ${fmtDateShort(weeksMeta[wi].end)}`)
     );
   });
 
-  // individual scheduled-payment breakdown hover on the Fixed / Scheduled section (incl. AP Payables)
+  // individual scheduled-payment breakdown on the Fixed / Scheduled section (incl. AP Payables) — click the 🔍 icon
   table.querySelectorAll("tr.fixed-row").forEach((tr) => {
     const rowType = tr.dataset.row;
     const cat = tr.dataset.cat || null;
@@ -321,7 +346,7 @@ export function renderForecast(store) {
     tds.forEach((td, idx) => {
       if (idx === 0) return; // label cell, nothing to break down
       const wi = idx === tds.length - 1 ? null : idx - 1; // null = Total column
-      attachBreakdownHover(
+      attachBreakdownClick(
         td,
         () => {
           if (wi === null) {

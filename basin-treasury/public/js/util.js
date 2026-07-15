@@ -73,11 +73,11 @@ export function toast(msg, type = "info", ms = 3600) {
   setTimeout(() => el.remove(), ms);
 }
 
-export function openModal(html, { onMount } = {}) {
+export function openModal(html, { onMount, closeOnBackdrop = true } = {}) {
   const host = document.getElementById("modal-host");
   host.innerHTML = `<div class="modal-backdrop" id="__modal_bg"><div class="modal">${html}</div></div>`;
   const bg = document.getElementById("__modal_bg");
-  bg.addEventListener("click", (e) => { if (e.target === bg) closeModal(); });
+  if (closeOnBackdrop) bg.addEventListener("click", (e) => { if (e.target === bg) closeModal(); });
   if (onMount) onMount(host);
   return host;
 }
