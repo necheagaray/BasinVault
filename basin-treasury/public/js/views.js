@@ -308,6 +308,7 @@ export function renderForecast(store) {
     if (hasOverride) {
       td.classList.add("overridden");
       if (who) td.insertAdjacentHTML("beforeend", `<span class="who-badge" title="Overridden by ${escapeHtml(who)}">${escapeHtml(who)}</span>`);
+      td.insertAdjacentHTML("beforeend", `<button type="button" class="reset-override-btn" title="This cell is a manual override — click to revert to the computed value">↺</button>`);
     }
 
     editableCell(td, currentVal, (val) => {
@@ -315,6 +316,15 @@ export function renderForecast(store) {
         const per = s.periods.find((p) => p.id === period.id);
         const stamped = val === null ? null : { v: val, by: store.initials(), at: new Date().toISOString() };
         writeOverride(per, rowType, cat, wi, stamped);
+      });
+    });
+
+    td.querySelector(".reset-override-btn")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      store.mutate((s) => {
+        const per = s.periods.find((p) => p.id === period.id);
+        writeOverride(per, rowType, cat, wi, null);
       });
     });
   });

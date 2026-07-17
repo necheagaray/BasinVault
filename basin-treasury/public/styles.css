@@ -500,7 +500,7 @@ table.cf-grid td.opening-open:hover{ background:rgba(200,163,90,0.18) !important
 table.cf-grid tr:hover td{ filter:brightness(1.12); }
 table.cf-grid td.cell-editable{ position:relative; cursor:pointer; }
 table.cf-grid td.cell-editable:hover{ background:rgba(200,163,90,0.1); }
-table.cf-grid td.overridden{ box-shadow: inset 0 0 0 1px var(--brass-dim); border-radius:3px; }
+table.cf-grid td.overridden{ box-shadow: inset 0 0 0 1.5px var(--brass); background:rgba(200,163,90,0.06); border-radius:3px; }
 .cell-input{
   width:100px; text-align:right; background:var(--bg-deep); border:1px solid var(--brass);
   color:var(--text-hi); font-family:var(--font-mono); font-size:13px; padding:3px 6px; border-radius:3px;
@@ -814,6 +814,15 @@ td.cf-date{ cursor:pointer; box-shadow:inset 0 -1px 0 0 var(--brass-dim); border
 td.cf-date:hover{ background:rgba(200,163,90,0.12); }
 td.balance-cell{ cursor:pointer; box-shadow:inset 0 -1px 0 0 var(--brass-dim); border-radius:2px; transition:background .15s; }
 td.balance-cell:hover{ background:rgba(200,163,90,0.12); }
+
+.reset-override-btn{
+  position:absolute; top:1px; right:2px; z-index:2;
+  background:none; border:none; padding:0; margin:0; width:14px; height:14px;
+  font-size:11px; line-height:14px; text-align:center; color:var(--brass);
+  opacity:0.55; cursor:pointer !important; pointer-events:auto !important;
+  transition:opacity .12s, transform .2s;
+}
+.reset-override-btn:hover{ opacity:1 !important; color:var(--brass-bright); transform:rotate(-90deg); }
 
 .breakdown-modal-body{ max-height:60vh; overflow-y:auto; margin-top:6px; padding-right:6px; }
 .cell-detail-btn{
