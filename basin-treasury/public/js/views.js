@@ -650,13 +650,26 @@ function openPaymentHistoryModal(store, id) {
       ${fmtMoney(paidSoFar)} paid of ${fmtMoney(rec.originalBalance ?? rec.balance ?? 0)} · ${fmtMoney(rec.balance ?? 0)} still owed</div>
     <div class="breakdown-modal-body">
       ${payments.length ? payments.map((p, i) => `
-        <div class="vendor-rank"><span>${fmtDate(p.date)}</span><span class="amt">${fmtMoney(p.amount)} <button type="button" class="mini-btn remove-payment" data-idx="${i}" style="margin-left:8px;">✕ remove</button></span></div>
+        <div class="vendor-rank payment-row" data-idx="${i}">
+          <span>${fmtDate(p.date)}</span>
+          <span class="amt">${fmtMoney(p.amount)}
+            <button type="button" class="mini-btn edit-payment" data-idx="${i}" style="margin-left:8px;">✎ edit</button>
+            <button type="button" class="mini-btn remove-payment" data-idx="${i}" style="margin-left:4px;">✕ remove</button>
+          </span>
+        </div>
       `).join("") : `<div class="meta">No payments recorded yet.</div>`}
     </div>
   `, {
     closeOnBackdrop: false,
     onMount: (host) => {
       host.querySelector("#hist-close").onclick = closeModal;
+      const recompute = (item) => {
+        const paid = item.payments.reduce((a, p) => a + p.amount, 0);
+        item.balance = Math.max(0, Math.round(((item.originalBalance ?? item.balance) - paid) * 100) / 100);
+        if (item.balance > 0) item.status = "open";
+        else if (item.balance <= 0) { item.balance = 0; item.status = "paid"; }
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+      };
       host.querySelectorAll(".remove-payment").forEach((btn) => {
         btn.addEventListener("click", () => {
           const idx = Number(btn.dataset.idx);
@@ -667,14 +680,40 @@ function openPaymentHistoryModal(store, id) {
             const pos = item.payments.indexOf(target);
             if (pos === -1) return;
             item.payments.splice(pos, 1);
-            const paid = item.payments.reduce((a, p) => a + p.amount, 0);
-            item.balance = Math.max(0, Math.round(((item.originalBalance ?? item.balance) - paid) * 100) / 100);
-            if (item.balance > 0) item.status = "open";
-            item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+            recompute(item);
           });
           toast("Payment removed", "success");
           closeModal();
           openPaymentHistoryModal(store, id);
+        });
+      });
+      host.querySelectorAll(".edit-payment").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.dataset.idx);
+          const target = payments[idx];
+          const row = host.querySelector(`.payment-row[data-idx="${idx}"]`);
+          row.innerHTML = `
+            <input type="date" class="mini-input edit-pay-date" value="${target.date || ""}" />
+            <span class="amt"><input type="number" step="0.01" class="mini-input edit-pay-amt" value="${target.amount}" style="width:80px;" />
+              <button type="button" class="mini-btn save-edit-payment" style="margin-left:6px;">Save</button>
+            </span>
+          `;
+          row.querySelector(".save-edit-payment").addEventListener("click", () => {
+            const newAmt = parseFloat(row.querySelector(".edit-pay-amt").value);
+            const newDate = row.querySelector(".edit-pay-date").value || target.date;
+            if (Number.isNaN(newAmt) || newAmt <= 0) { toast("Enter a valid payment amount", "error"); return; }
+            store.mutate((s) => {
+              const item = s.receivables.find((x) => x.id === id);
+              if (!item || !item.payments) return;
+              const pos = item.payments.indexOf(target);
+              if (pos === -1) return;
+              item.payments[pos] = { date: newDate, amount: newAmt };
+              recompute(item);
+            });
+            toast("Payment updated", "success");
+            closeModal();
+            openPaymentHistoryModal(store, id);
+          });
         });
       });
     },
@@ -787,7 +826,7 @@ function renderARRows(store, period) {
       <td><input class="mini-input days-input ${r.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the pay date is uncertain" ${r.status !== "open" ? "disabled" : ""}/></td>
       <td class="mono cf-date">${r.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (r.cfDate ? fmtDate(r.cfDate) : "—")}${whoBadge}</td>
       <td class="mono">${r.date ? `${daysBetween(r.date, todayISO())}d` : "—"}</td>
-      <td class="num">${fmtMoney(r.balance)}${hasPartial ? `<div class="partial-note">${fmtMoney(paidSoFar)} paid of ${fmtMoney(r.originalBalance ?? r.balance)}</div>` : ""}${hasPayments ? `<button type="button" class="payment-history-link" title="View / manage payment history">${(r.payments || []).length} payment${(r.payments || []).length === 1 ? "" : "s"} ▸</button>` : ""}</td>
+      <td class="num balance-cell" title="Click to correct this invoice's balance directly">${fmtMoney(r.balance)}${hasPartial ? `<div class="partial-note">${fmtMoney(paidSoFar)} paid of ${fmtMoney(r.originalBalance ?? r.balance)}</div>` : ""}${hasPayments ? `<button type="button" class="payment-history-link" title="View / manage payment history">${(r.payments || []).length} payment${(r.payments || []).length === 1 ? "" : "s"} ▸</button>` : ""}</td>
       <td><span class="badge ${r.status}">${r.status}</span></td>
       <td>
         ${r.status === "open" ? `<button class="mini-btn record-payment" title="Record a partial or full payment">💲 Pay</button>` : ""}
@@ -833,7 +872,30 @@ function renderARRows(store, period) {
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
-    tr.querySelector(".payment-history-link")?.addEventListener("click", () => openPaymentHistoryModal(store, id));
+    tr.querySelector(".payment-history-link")?.addEventListener("click", (e) => { e.stopPropagation(); openPaymentHistoryModal(store, id); });
+    tr.querySelector(".balance-cell")?.addEventListener("click", (e) => {
+      if (e.target.closest(".payment-history-link")) return;
+      const td = tr.querySelector(".balance-cell");
+      const current = state.receivables.find((x) => x.id === id)?.balance ?? 0;
+      const input = document.createElement("input");
+      input.type = "number"; input.step = "0.01"; input.className = "mini-input"; input.style.width = "100px"; input.style.textAlign = "right";
+      input.value = current;
+      td.innerHTML = ""; td.appendChild(input); input.focus(); input.select();
+      const commit = () => {
+        const val = parseFloat(input.value);
+        store.mutate((s) => {
+          const item = s.receivables.find((x) => x.id === id);
+          if (!item || Number.isNaN(val) || val < 0) return;
+          const paidSoFar = (item.payments || []).reduce((a, p) => a + p.amount, 0);
+          item.balance = Math.round(val * 100) / 100;
+          item.originalBalance = Math.round((item.balance + paidSoFar) * 100) / 100;
+          if (item.balance <= 0 && item.status === "open") { item.balance = 0; item.status = "paid"; }
+          item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+        });
+      };
+      input.addEventListener("keydown", (e2) => { if (e2.key === "Enter") input.blur(); if (e2.key === "Escape") { input.value = current; input.blur(); } });
+      input.addEventListener("blur", commit, { once: true });
+    });
     tr.querySelector(".del-row")?.addEventListener("click", () => {
       if (!confirm(`Remove invoice ${rec.docNumber || ""} for ${rec.customer}?`)) return;
       store.mutate((s) => { s.receivables = s.receivables.filter((x) => x.id !== id); });

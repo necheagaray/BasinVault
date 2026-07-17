@@ -248,6 +248,7 @@ body.viewer-mode .pwp-receivable-select,
 body.viewer-mode .toggle,
 body.viewer-mode .active-toggle,
 body.viewer-mode .cf-date,
+body.viewer-mode .balance-cell,
 body.viewer-mode #btn-save-version,
 body.viewer-mode #ar-import-btn,
 body.viewer-mode #ar-add-btn,
@@ -811,6 +812,8 @@ table.data-table th.sortable.sorted{ color:var(--brass-bright); }
 
 td.cf-date{ cursor:pointer; box-shadow:inset 0 -1px 0 0 var(--brass-dim); border-radius:2px; transition:background .15s; }
 td.cf-date:hover{ background:rgba(200,163,90,0.12); }
+td.balance-cell{ cursor:pointer; box-shadow:inset 0 -1px 0 0 var(--brass-dim); border-radius:2px; transition:background .15s; }
+td.balance-cell:hover{ background:rgba(200,163,90,0.12); }
 
 .breakdown-modal-body{ max-height:60vh; overflow-y:auto; margin-top:6px; padding-right:6px; }
 .cell-detail-btn{
