@@ -167,9 +167,9 @@ export function computeForecast(state, period) {
   const scheduledReceivables = Array(WEEKS_PER_PERIOD).fill(0);
   const scheduledPayables = Array(WEEKS_PER_PERIOD).fill(0);
   for (const r of state.receivables) {
-    if (r.status !== "open") continue;
     const wi = weekIndexForDate(period, r.cfDate);
-    if (wi !== null) scheduledReceivables[wi] += r.balance;
+    if (wi === null) continue;
+    scheduledReceivables[wi] += (r.originalBalance ?? r.balance);
   }
   for (const p of state.payables) {
     if (p.status !== "open") continue;
