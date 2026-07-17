@@ -86,8 +86,20 @@ function receivablesBreakdown(state, period, wi /* number or null = whole period
     if (idx === null) return false;
     return wi === null ? true : idx === wi;
   };
-  const open = state.receivables.filter((r) => r.status === "open" && matches(r));
-  const paid = state.receivables.filter((r) => r.status === "paid" && r.cfDate && matches(r));
+
+  const paid = [];
+  const open = [];
+  for (const r of state.receivables) {
+    if (!matches(r)) continue;
+    const paidSoFar = (r.payments || []).reduce((a, p) => a + p.amount, 0);
+    if (r.status === "paid") {
+      paid.push({ ...r, balance: r.originalBalance ?? r.balance });
+    } else if (r.status === "open") {
+      if (paidSoFar > 0) paid.push({ ...r, balance: paidSoFar, docNumber: `${r.docNumber || ""} (partial)` });
+      open.push(r);
+    }
+  }
+
   const totalOpen = open.reduce((a, r) => a + r.balance, 0);
   const totalPaid = paid.reduce((a, r) => a + r.balance, 0);
   const totalAll = totalOpen + totalPaid;
@@ -545,7 +557,7 @@ function openItemNoteModal(store, listKey, id) {
 
 /* ============================================================ RECEIVABLES ============================================================ */
 
-let arFilter = "open", arSearch = "", arWeekFilter = null;
+let arFilter = "open", arSearch = "", arWeekFilter = null, arCustomerFilter = "";
 let arSortBy = "customer", arSortDir = "asc";
 
 // sorts by the letters in a name only — ignores job/invoice numbers, dashes,
@@ -583,7 +595,7 @@ export function renderReceivables(store) {
     const isCurrent = w.index === 0;
     const full = bd.totalAll > 0 && bd.pct >= 100;
     const filtered = arWeekFilter === w.index;
-    return `<div class="collect-card ${isCurrent ? "current" : ""} ${full ? "full" : ""} ${filtered ? "filtered" : ""}" data-wi="${w.index}" title="Click to filter the table below to this week">
+    return `<div class="collect-card ${isCurrent ? "current" : ""} ${full ? "full" : ""} ${filtered ? "filtered" : ""}" data-wi="${w.index}" title="Click the card to filter the table below · click 🔍 for a detailed breakdown">
       <div class="sand-fill" style="height:${bd.pct}%"><div class="sand-surface"></div></div>
       <div class="card-content">
         <div class="wk">${fmtDateShort(w.start)} – ${fmtDateShort(w.end)}</div>
@@ -595,9 +607,8 @@ export function renderReceivables(store) {
   }).join("");
   collectRow.querySelectorAll(".collect-card").forEach((card) => {
     const wi = Number(card.dataset.wi);
-    attachBreakdownHover(card, () => receivablesBreakdown(state, period, wi), () => `Receivables — ${fmtDateShort(weeks[wi].start)} – ${fmtDateShort(weeks[wi].end)}`);
+    attachBreakdownClick(card, () => receivablesBreakdown(state, period, wi), () => `Receivables — ${fmtDateShort(weeks[wi].start)} – ${fmtDateShort(weeks[wi].end)}`);
     card.addEventListener("click", () => {
-      document.querySelectorAll(".breakdown-tooltip").forEach((el) => el.remove());
       arWeekFilter = arWeekFilter === wi ? null : wi;
       renderReceivables(store);
     });
@@ -610,6 +621,11 @@ export function renderReceivables(store) {
   document.getElementById("ar-search").value = arSearch;
   document.getElementById("ar-search").oninput = (e) => { arSearch = e.target.value.toLowerCase(); renderARRows(store, period); };
 
+  const custSel = document.getElementById("ar-customer-filter");
+  const customers = Array.from(new Set(state.receivables.map((r) => r.customer))).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
+  custSel.innerHTML = `<option value="">All Customers</option>${customers.map((c) => `<option value="${escapeHtml(c)}" ${c === arCustomerFilter ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}`;
+  custSel.onchange = () => { arCustomerFilter = custSel.value; renderARRows(store, period); };
+
   document.getElementById("ar-import-btn").onclick = () => document.getElementById("file-input-ar").click();
   document.getElementById("ar-add-btn").onclick = () => openManualInvoiceModal(store, "AR");
   document.getElementById("ar-clear-btn").onclick = () => {
@@ -620,6 +636,49 @@ export function renderReceivables(store) {
   };
 
   renderARRows(store, period);
+}
+
+function openPaymentHistoryModal(store, id) {
+  const rec = store.state.receivables.find((x) => x.id === id);
+  if (!rec) return;
+  const payments = (rec.payments || []).slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const paidSoFar = payments.reduce((a, p) => a + p.amount, 0);
+  openModal(`
+    <button type="button" class="modal-close-x" id="hist-close">✕</button>
+    <h3>Payment History</h3>
+    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">${escapeHtml(rec.customer || "")} · ${escapeHtml(rec.docNumber || "")}<br/>
+      ${fmtMoney(paidSoFar)} paid of ${fmtMoney(rec.originalBalance ?? rec.balance ?? 0)} · ${fmtMoney(rec.balance ?? 0)} still owed</div>
+    <div class="breakdown-modal-body">
+      ${payments.length ? payments.map((p, i) => `
+        <div class="vendor-rank"><span>${fmtDate(p.date)}</span><span class="amt">${fmtMoney(p.amount)} <button type="button" class="mini-btn remove-payment" data-idx="${i}" style="margin-left:8px;">✕ remove</button></span></div>
+      `).join("") : `<div class="meta">No payments recorded yet.</div>`}
+    </div>
+  `, {
+    closeOnBackdrop: false,
+    onMount: (host) => {
+      host.querySelector("#hist-close").onclick = closeModal;
+      host.querySelectorAll(".remove-payment").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.dataset.idx);
+          const target = payments[idx];
+          store.mutate((s) => {
+            const item = s.receivables.find((x) => x.id === id);
+            if (!item || !item.payments) return;
+            const pos = item.payments.indexOf(target);
+            if (pos === -1) return;
+            item.payments.splice(pos, 1);
+            const paid = item.payments.reduce((a, p) => a + p.amount, 0);
+            item.balance = Math.max(0, Math.round(((item.originalBalance ?? item.balance) - paid) * 100) / 100);
+            if (item.balance > 0) item.status = "open";
+            item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+          });
+          toast("Payment removed", "success");
+          closeModal();
+          openPaymentHistoryModal(store, id);
+        });
+      });
+    },
+  });
 }
 
 function openRecordPaymentModal(store, id) {
@@ -686,6 +745,7 @@ function renderARRows(store, period) {
   if (arFilter === "paid") list = list.filter((r) => r.status === "paid");
   if (arSearch) list = list.filter((r) => `${r.customer} ${r.docNumber} ${r.poNumber || ""}`.toLowerCase().includes(arSearch));
   if (arWeekFilter !== null) list = list.filter((r) => weekIndexForDate(period, r.cfDate) === arWeekFilter);
+  if (arCustomerFilter) list = list.filter((r) => r.customer === arCustomerFilter);
   list = list.slice().sort((a, b) => {
     let cmp;
     if (arSortBy === "date") cmp = (a.date || "").localeCompare(b.date || "");
@@ -716,6 +776,7 @@ function renderARRows(store, period) {
     const whoBadge = r.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(r.lastEditBy)}">${escapeHtml(r.lastEditBy)}</span>` : "";
     const daysVal = r.uncertain ? "unc" : (r.daysOverride ?? days);
     const paidSoFar = (r.payments || []).reduce((a, p) => a + p.amount, 0);
+    const hasPayments = (r.payments || []).length > 0;
     const hasPartial = paidSoFar > 0 && r.balance > 0;
     return `<tr class="${r.status === "paid" ? "paid" : ""} ${r.uncertain ? "uncertain-row" : ""}" data-id="${r.id}">
       <td class="name">${escapeHtml(r.customer)}</td>
@@ -726,7 +787,7 @@ function renderARRows(store, period) {
       <td><input class="mini-input days-input ${r.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the pay date is uncertain" ${r.status !== "open" ? "disabled" : ""}/></td>
       <td class="mono cf-date">${r.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (r.cfDate ? fmtDate(r.cfDate) : "—")}${whoBadge}</td>
       <td class="mono">${r.date ? `${daysBetween(r.date, todayISO())}d` : "—"}</td>
-      <td class="num">${fmtMoney(r.balance)}${hasPartial ? `<div class="partial-note">${fmtMoney(paidSoFar)} paid of ${fmtMoney(r.originalBalance ?? r.balance)}</div>` : ""}</td>
+      <td class="num">${fmtMoney(r.balance)}${hasPartial ? `<div class="partial-note">${fmtMoney(paidSoFar)} paid of ${fmtMoney(r.originalBalance ?? r.balance)}</div>` : ""}${hasPayments ? `<button type="button" class="payment-history-link" title="View / manage payment history">${(r.payments || []).length} payment${(r.payments || []).length === 1 ? "" : "s"} ▸</button>` : ""}</td>
       <td><span class="badge ${r.status}">${r.status}</span></td>
       <td>
         ${r.status === "open" ? `<button class="mini-btn record-payment" title="Record a partial or full payment">💲 Pay</button>` : ""}
@@ -763,10 +824,16 @@ function renderARRows(store, period) {
     tr.querySelector(".toggle-status")?.addEventListener("click", () => {
       store.mutate((s) => {
         const item = s.receivables.find((x) => x.id === id);
+        const reopening = item.status === "paid";
         item.status = item.status === "open" ? "paid" : "open";
+        if (reopening && item.originalBalance !== undefined) {
+          const paidSoFar = (item.payments || []).reduce((a, p) => a + p.amount, 0);
+          item.balance = Math.max(0, Math.round((item.originalBalance - paidSoFar) * 100) / 100);
+        }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
+    tr.querySelector(".payment-history-link")?.addEventListener("click", () => openPaymentHistoryModal(store, id));
     tr.querySelector(".del-row")?.addEventListener("click", () => {
       if (!confirm(`Remove invoice ${rec.docNumber || ""} for ${rec.customer}?`)) return;
       store.mutate((s) => { s.receivables = s.receivables.filter((x) => x.id !== id); });
