@@ -204,7 +204,7 @@ export function computeForecast(state, period) {
 
   const rows = weeks.map((w) => {
     const wi = w.index;
-    const receivablesCollected = ovVal(ov, "receivablesCollected", wi, scheduledReceivables[wi]);
+    const receivablesCollected = scheduledReceivables[wi]; // always computed from CF dates — not manually overridable
     const otherInflows = ovVal(ov, "otherInflows", wi, 0);
     const totalInflows = receivablesCollected + otherInflows;
 
