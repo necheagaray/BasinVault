@@ -1,7 +1,7 @@
 import * as api from "./api.js";
 import { defaultState, mergeStates } from "./state.js";
 import { debounce, toast, contourSVG, masterPlanSVG } from "./util.js";
-import { renderForecast, renderReceivables, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
+import { renderForecast, renderReceivables, renderUnbilled, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
 
 document.getElementById("login-contours").innerHTML = contourSVG(3, { w: 900, h: 700 });
 document.getElementById("topbar-contours").innerHTML = contourSVG(7, { w: 1600, h: 100 });
@@ -10,6 +10,7 @@ document.getElementById("settings-blueprint").innerHTML = masterPlanSVG();
 const RENDERERS = {
   forecast: renderForecast,
   receivables: renderReceivables,
+  unbilled: renderUnbilled,
   payables: renderPayables,
   fixed: renderFixed,
   settings: renderSettings,
@@ -114,6 +115,8 @@ const Store = {
     try {
       const snap = await api.fetchSnapshot(key);
       this.state = snap.state;
+      if (!this.state.unbilledReceivables) this.state.unbilledReceivables = [];
+      if (!this.state.projectAutoSchedule) this.state.projectAutoSchedule = {};
       await this.pushNow();
       this.render();
       toast(`Restored version ${snap.version}`, "success");
@@ -154,6 +157,8 @@ async function boot() {
       remote.updatedBy = user.user;
     }
     if (!remote.manualOutflowCategories.includes("Other")) remote.manualOutflowCategories.push("Other");
+    if (!remote.unbilledReceivables) remote.unbilledReceivables = [];
+    if (!remote.projectAutoSchedule) remote.projectAutoSchedule = {};
     Store.state = remote;
     showApp();
     Store.render();

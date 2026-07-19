@@ -22,10 +22,12 @@ export function defaultState() {
     periods: [makePeriod("p1", "Opening Period", toISO(start))],
     manualOutflowCategories: [...DEFAULT_OUTFLOW_CATEGORIES],
     receivables: [],
+    unbilledReceivables: [], // project-revenue-forecast lines — not yet in NetSuite's Aged AR
     payables: [],
     fixedPayments: [],
     customerAutoSchedule: {}, // { [customerName]: { days:number, auto:boolean } }
     vendorAutoSchedule: {},
+    projectAutoSchedule: {}, // same idea, keyed by project name, for unbilled receivables
   };
 }
 
@@ -59,6 +61,75 @@ export function makePeriod(id, label, startISO) {
 
 export function getPeriod(state, id) {
   return state.periods.find((p) => p.id === id) || state.periods[0];
+}
+
+function autoPeriodLabel(startISO) {
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const start = parseISO(startISO);
+  const end = addDays(start, 34);
+  const sm = months[start.getMonth()], em = months[end.getMonth()];
+  return sm === em ? sm : `${sm}-${em}`;
+}
+
+function shiftWeekMap(map) {
+  const out = {};
+  for (const k of Object.keys(map || {})) {
+    const wi = Number(k);
+    if (Number.isNaN(wi)) continue;
+    if (wi === 0) continue; // the completed week is dropped
+    out[wi - 1] = map[k];
+  }
+  return out;
+}
+
+function shiftOverrides(ov) {
+  ov = ov || {};
+  const out = {
+    receivablesCollected: shiftWeekMap(ov.receivablesCollected),
+    otherInflows: shiftWeekMap(ov.otherInflows),
+    apPayables: shiftWeekMap(ov.apPayables),
+    locDraw: shiftWeekMap(ov.locDraw),
+    manualOutflow: {},
+    fixedGroup: {},
+  };
+  for (const cat of Object.keys(ov.manualOutflow || {})) out.manualOutflow[cat] = shiftWeekMap(ov.manualOutflow[cat]);
+  for (const cat of Object.keys(ov.fixedGroup || {})) out.fixedGroup[cat] = shiftWeekMap(ov.fixedGroup[cat]);
+  return out;
+}
+
+function shiftNotes(notes) {
+  const out = {};
+  for (const key of Object.keys(notes || {})) {
+    const m = key.match(/^(.*)::([0-4])$/);
+    if (!m) { out[key] = notes[key]; continue; } // row-level / total-column notes carry over untouched
+    const wi = Number(m[2]);
+    if (wi === 0) continue; // note was on the completed week — drop it with that week
+    out[`${m[1]}::${wi - 1}`] = notes[key];
+  }
+  return out;
+}
+
+// "Roll forward" a period: drop the completed first week, shift weeks 2-5 up
+// to become weeks 1-4, and open a new week 5 at the end. Returns a brand-new
+// period object (the old one is left alone in history) — caller is responsible
+// for pushing it into state.periods and making it active.
+export function rollForwardPeriod(state, periodId) {
+  const old = state.periods.find((p) => p.id === periodId);
+  if (!old) return null;
+
+  const calc = computeForecast(state, old);
+  const newStart = toISO(addDays(old.startDate, 7));
+  const oldPayrollWeeks = payrollWeeksFor(old);
+
+  const next = makePeriod(uid("p"), autoPeriodLabel(newStart), newStart);
+  next.openingCash = Math.round(calc.weeks[0].closing * 100) / 100;
+  next.locOpeningBalance = Math.round(calc.weeks[0].locBalance * 100) / 100;
+  next.payroll = { amount: old.payroll?.amount || 0, firstWeek: oldPayrollWeeks.includes(1) ? 0 : 1 };
+  next.k401 = { amount: old.k401?.amount || 0 };
+  next.overrides = shiftOverrides(old.overrides);
+  next.notes = shiftNotes(old.notes);
+
+  return next;
 }
 
 export function periodWeeks(period) {
@@ -170,6 +241,12 @@ export function computeForecast(state, period) {
     const wi = weekIndexForDate(period, r.cfDate);
     if (wi === null) continue;
     scheduledReceivables[wi] += (r.originalBalance ?? r.balance);
+  }
+  for (const u of state.unbilledReceivables || []) {
+    if (u.status !== "open") continue; // closed = no longer a valid forecast, not "collected"
+    const wi = weekIndexForDate(period, u.cfDate);
+    if (wi === null) continue;
+    scheduledReceivables[wi] += (u.originalBalance ?? u.balance);
   }
   for (const p of state.payables) {
     if (p.status !== "open") continue;
@@ -350,11 +427,13 @@ export function mergeStates(local, remote) {
   }
 
   merged.receivables = mergeById(local.receivables, remote.receivables);
+  merged.unbilledReceivables = mergeById(local.unbilledReceivables || [], remote.unbilledReceivables || []);
   merged.payables = mergeById(local.payables, remote.payables);
   merged.fixedPayments = mergeById(local.fixedPayments, remote.fixedPayments);
 
   merged.customerAutoSchedule = { ...remote.customerAutoSchedule, ...local.customerAutoSchedule };
   merged.vendorAutoSchedule = { ...remote.vendorAutoSchedule, ...local.vendorAutoSchedule };
+  merged.projectAutoSchedule = { ...(remote.projectAutoSchedule || {}), ...(local.projectAutoSchedule || {}) };
   merged.manualOutflowCategories = Array.from(new Set([...(remote.manualOutflowCategories || []), ...(local.manualOutflowCategories || [])]));
   merged.activePeriodId = local.activePeriodId || remote.activePeriodId;
 
@@ -419,10 +498,43 @@ export function mergeAgingImport(state, kind, parsed) {
   return { added, updated, paidOff };
 }
 
+// Unbilled Receivables don't have a stable natural key to match against on
+// re-import the way NetSuite invoices do (no doc number), so — for now —
+// import always adds fresh lines rather than updating existing ones. Once
+// the real project-forecast file format is settled, this can be tightened
+// to match/update by project the same way mergeAgingImport does for AR/AP.
+export function mergeUnbilledImport(state, parsed) {
+  let added = 0;
+  for (const rec of parsed) {
+    const tmpl = state.projectAutoSchedule[rec.project];
+    if (!state.projectAutoSchedule[rec.project]) state.projectAutoSchedule[rec.project] = { days: 30, auto: false };
+    const item = {
+      id: uid("ub"),
+      project: rec.project,
+      description: rec.description || "",
+      date: rec.date,
+      balance: rec.amount,
+      originalBalance: rec.amount,
+      status: "open",
+      cfDate: rec.cfDate || (tmpl?.auto && rec.date ? toISO(addDays(rec.date, tmpl.days || 0)) : null),
+      daysOverride: null,
+      uncertain: false,
+      source: "import",
+    };
+    state.unbilledReceivables.push(item);
+    added++;
+  }
+  return { added };
+}
+
+export const KIND_MAP = {
+  AR: { listKey: "receivables", groupKey: "customer", schedKey: "customerAutoSchedule" },
+  AP: { listKey: "payables", groupKey: "vendor", schedKey: "vendorAutoSchedule" },
+  UNBILLED: { listKey: "unbilledReceivables", groupKey: "project", schedKey: "projectAutoSchedule" },
+};
+
 export function applyAutoScheduleToAll(state, kind) {
-  const listKey = kind === "AR" ? "receivables" : "payables";
-  const groupKey = kind === "AR" ? "customer" : "vendor";
-  const schedKey = kind === "AR" ? "customerAutoSchedule" : "vendorAutoSchedule";
+  const { listKey, groupKey, schedKey } = KIND_MAP[kind];
   let count = 0;
   for (const x of state[listKey]) {
     if (x.status !== "open" || x.payWhenPaid) continue;
@@ -436,9 +548,7 @@ export function applyAutoScheduleToAll(state, kind) {
 }
 
 export function applyAutoScheduleToGroup(state, kind, groupName) {
-  const listKey = kind === "AR" ? "receivables" : "payables";
-  const groupKey = kind === "AR" ? "customer" : "vendor";
-  const schedKey = kind === "AR" ? "customerAutoSchedule" : "vendorAutoSchedule";
+  const { listKey, groupKey, schedKey } = KIND_MAP[kind];
   const tmpl = state[schedKey][groupName];
   if (!tmpl) return 0;
   let count = 0;

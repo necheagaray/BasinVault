@@ -156,3 +156,86 @@ export function parseAgingWorkbook(arrayBuffer, kind) {
   const rows = parseXlsxRows(arrayBuffer);
   return extractRecords(rows, kind);
 }
+
+// --------------------------------------------------------------------------
+// Project revenue forecast → Unbilled Receivables
+// There's no fixed NetSuite format for this (it's a custom report you'll
+// provide), so instead of matching exact columns like the Aging reports do,
+// this looks for the header row and does best-effort matching against common
+// column-name variants. Once you share a real sample, this can be tightened
+// to match it exactly the same way the Aging parser does.
+// --------------------------------------------------------------------------
+
+const HEADER_ALIASES = {
+  project: ["project", "project name", "job", "job name", "job #", "project #", "customer:project"],
+  description: ["description", "job description", "scope", "project description", "notes"],
+  date: ["date", "invoice date", "forecast date", "billing date", "expected invoice date"],
+  cfDate: ["cf date", "expected date", "collection date", "expected collection date", "pay date"],
+  amount: ["amount", "revenue", "forecast amount", "projected revenue", "projected amount", "balance", "value"],
+};
+
+function findColumn(headerRow, aliases) {
+  const lower = headerRow.map((h) => cellStr(h).toLowerCase().trim());
+  for (const alias of aliases) {
+    const idx = lower.indexOf(alias);
+    if (idx !== -1) return idx;
+  }
+  // loose fallback: any header that *contains* one of the alias words
+  for (let i = 0; i < lower.length; i++) {
+    if (aliases.some((a) => lower[i].includes(a))) return i;
+  }
+  return -1;
+}
+
+function extractUnbilledRecords(rows) {
+  if (!rows.length) throw new Error("That file doesn't have any rows in it.");
+  // find the first row that looks like a header (has a project-ish and amount-ish column)
+  let headerIdx = -1, cols = null;
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const iProject = findColumn(rows[i], HEADER_ALIASES.project);
+    const iAmount = findColumn(rows[i], HEADER_ALIASES.amount);
+    if (iProject !== -1 && iAmount !== -1) {
+      headerIdx = i;
+      cols = {
+        project: iProject,
+        description: findColumn(rows[i], HEADER_ALIASES.description),
+        date: findColumn(rows[i], HEADER_ALIASES.date),
+        cfDate: findColumn(rows[i], HEADER_ALIASES.cfDate),
+        amount: iAmount,
+      };
+      break;
+    }
+  }
+  if (headerIdx === -1) {
+    throw new Error("Couldn't find a header row with a project/job column and an amount column. Check the file's column names.");
+  }
+
+  const records = [];
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r || !r.length) continue;
+    const project = cellStr(r[cols.project]);
+    if (!project) continue;
+    const amount = cellNum(r[cols.amount]);
+    if (!amount) continue;
+    records.push({
+      project,
+      description: cols.description !== -1 ? cellStr(r[cols.description]) : "",
+      date: cols.date !== -1 ? cellDateISO(r[cols.date]) : null,
+      cfDate: cols.cfDate !== -1 ? cellDateISO(r[cols.cfDate]) : null,
+      amount,
+    });
+  }
+  return records;
+}
+
+export function parseProjectForecastReport(text) {
+  const looksXml = /^\s*<\?xml/.test(text) || text.includes("<Workbook");
+  const rows = looksXml ? parseXmlRows(text) : parseCsvRows(text);
+  return extractUnbilledRecords(rows);
+}
+
+export function parseProjectForecastWorkbook(arrayBuffer) {
+  const rows = parseXlsxRows(arrayBuffer);
+  return extractUnbilledRecords(rows);
+}
