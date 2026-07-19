@@ -219,8 +219,9 @@
         <div class="insight-row" id="ub-insights"></div>
 
         <div class="toolbar">
-          <input type="search" id="ub-search" placeholder="Search project, description…" />
-          <select class="mini-select" id="ub-project-filter"><option value="">All Projects</option></select>
+          <input type="search" id="ub-search" placeholder="Search project #, project, customer…" />
+          <select class="mini-select" id="ub-customer-filter"><option value="">All Customers</option></select>
+          <select class="mini-select" id="ub-window-filter"><option value="">4-Wk &amp; 8-Wk</option><option value="4wk">4-Wk Only</option><option value="8wk">8-Wk Only</option></select>
           <div class="chip-tabs" id="ub-status-tabs">
             <button data-f="open" class="active">Open</button>
             <button data-f="all">All</button>
@@ -234,7 +235,8 @@
       <div class="table-scroll">
         <table class="data-table" id="ub-table">
           <thead><tr>
-            <th class="sortable" data-sort="project">Project <span class="sort-arrow"></span></th><th>Description</th><th class="sortable" data-sort="date">Invoice Date <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort="customer">Customer <span class="sort-arrow"></span></th><th>Project</th><th>Window</th>
+            <th class="sortable" data-sort="date">Invoice Date <span class="sort-arrow"></span></th><th>Bill %</th>
             <th>Days →</th><th>CF Date</th><th class="num">Amount</th><th>Status</th><th></th>
           </tr></thead>
           <tbody id="ub-tbody"></tbody>
@@ -341,7 +343,7 @@
 
       <div class="panel settings-section">
         <h3>Customer Auto-Schedule</h3>
-        <div class="desc">Permanent template — days-from-invoice and the auto-schedule toggle carry into every AR import. Auto-schedule is always optional; override any CF date manually on the Receivables tab at any time.</div>
+        <div class="desc">Permanent template — days-from-invoice and the auto-schedule toggle carry into every AR import <strong>and every Unbilled Receivables import/entry</strong> for that customer. Auto-schedule is always optional; override any CF date manually at any time.</div>
         <input type="text" class="mini-input" style="width:220px; margin-bottom:10px;" id="ar-auto-search" placeholder="Search customers…" />
         <div class="auto-row head"><span>Customer</span><span>Balance</span><span>Days</span><span>Auto</span><span>Apply</span></div>
         <div id="ar-auto-list" style="max-height:360px; overflow:auto;"></div>
@@ -353,14 +355,6 @@
         <input type="text" class="mini-input" style="width:220px; margin-bottom:10px;" id="ap-auto-search" placeholder="Search vendors…" />
         <div class="auto-row head"><span>Vendor</span><span>Balance</span><span>Days</span><span>Auto</span><span>Apply</span></div>
         <div id="ap-auto-list" style="max-height:360px; overflow:auto;"></div>
-      </div>
-
-      <div class="panel settings-section">
-        <h3>Project Auto-Schedule</h3>
-        <div class="desc">Same idea, for Unbilled Receivables. Toggle on to auto-assign a CF date whenever a project's days-from-invoice template is set.</div>
-        <input type="text" class="mini-input" style="width:220px; margin-bottom:10px;" id="ub-auto-search" placeholder="Search projects…" />
-        <div class="auto-row head"><span>Project</span><span>Balance</span><span>Days</span><span>Auto</span><span>Apply</span></div>
-        <div id="ub-auto-list" style="max-height:360px; overflow:auto;"></div>
       </div>
     </section>
 

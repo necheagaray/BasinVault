@@ -1,10 +1,10 @@
 import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeModal, uid, todayISO, toISO, addDays, parseISO, daysBetween } from "./util.js";
 import {
   periodWeeks, computeForecast, weekIndexForDate, fixedOccurrencesInPeriod, scheduleLabel,
-  FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, mergeUnbilledImport, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor,
+  FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP,
 } from "./state.js";
-import { parseAgingReport, parseAgingWorkbook, parseProjectForecastReport, parseProjectForecastWorkbook } from "./parser.js";
+import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
 
 /* ============================================================ helpers ============================================================ */
 
@@ -101,7 +101,7 @@ function receivablesBreakdown(state, period, wi /* number or null = whole period
   }
   for (const u of state.unbilledReceivables || []) {
     if (u.status !== "open" || !matches(u)) continue;
-    open.push({ ...u, customer: `${u.project} (unbilled)`, docNumber: u.description || "" });
+    open.push({ ...u, customer: `${u.customer} (unbilled)`, docNumber: u.project || "" });
   }
 
   const totalOpen = open.reduce((a, r) => a + r.balance, 0);
@@ -937,8 +937,9 @@ function renderARRows(store, period) {
 
 /* ============================================================ UNBILLED RECEIVABLES ============================================================ */
 
-let ubFilter = "open", ubSearch = "", ubProjectFilter = "";
-let ubSortBy = "project", ubSortDir = "asc";
+let ubFilter = "open", ubSearch = "", ubCustomerFilter = "", ubWindowFilter = "";
+let ubSortBy = "customer", ubSortDir = "asc";
+const BILL_PERCENTS = [25, 50, 75, 90, 100, 110];
 
 export function renderUnbilled(store) {
   const { state } = store;
@@ -958,8 +959,8 @@ export function renderUnbilled(store) {
   `;
 
   const insightsHost = document.getElementById("ub-insights");
-  insightsHost.innerHTML = `<button type="button" class="insight-btn" id="ub-insight-projects"><span class="icon">🏆</span>Top 5 Project Balances<span class="arrow">▸</span></button>`;
-  document.getElementById("ub-insight-projects").onclick = () => openTopProjectsModal(openList);
+  insightsHost.innerHTML = `<button type="button" class="insight-btn" id="ub-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>`;
+  document.getElementById("ub-insight-customers").onclick = () => openTopUnbilledCustomersModal(openList);
 
   document.querySelectorAll("#ub-status-tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.f === ubFilter);
@@ -968,33 +969,36 @@ export function renderUnbilled(store) {
   document.getElementById("ub-search").value = ubSearch;
   document.getElementById("ub-search").oninput = (e) => { ubSearch = e.target.value.toLowerCase(); renderUnbilledRows(store, period); };
 
-  const projSel = document.getElementById("ub-project-filter");
-  const projects = Array.from(new Set(list0.map((u) => u.project))).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
-  projSel.innerHTML = `<option value="">All Projects</option>${projects.map((p) => `<option value="${escapeHtml(p)}" ${p === ubProjectFilter ? "selected" : ""}>${escapeHtml(p)}</option>`).join("")}`;
-  projSel.onchange = () => { ubProjectFilter = projSel.value; renderUnbilledRows(store, period); };
+  const custSel = document.getElementById("ub-customer-filter");
+  const customers = Array.from(new Set(list0.map((u) => u.customer))).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
+  custSel.innerHTML = `<option value="">All Customers</option>${customers.map((c) => `<option value="${escapeHtml(c)}" ${c === ubCustomerFilter ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}`;
+  custSel.onchange = () => { ubCustomerFilter = custSel.value; renderUnbilledRows(store, period); };
+
+  document.getElementById("ub-window-filter").value = ubWindowFilter;
+  document.getElementById("ub-window-filter").onchange = (e) => { ubWindowFilter = e.target.value; renderUnbilledRows(store, period); };
 
   document.getElementById("ub-import-btn").onclick = () => document.getElementById("file-input-ub").click();
   document.getElementById("ub-add-btn").onclick = () => openManualUnbilledModal(store);
   document.getElementById("ub-clear-btn").onclick = () => {
     if (!list0.length) { toast("Unbilled Receivables are already empty", "info"); return; }
-    if (!confirm(`Delete all ${list0.length} unbilled lines? This can't be undone. Project auto-schedule settings will be kept.`)) return;
+    if (!confirm(`Delete all ${list0.length} unbilled lines? This can't be undone. Customer auto-schedule settings will be kept.`)) return;
     store.mutate((s) => { s.unbilledReceivables = []; });
-    toast("All unbilled receivables cleared — project auto-schedule settings kept", "success");
+    toast("All unbilled receivables cleared — customer auto-schedule settings kept", "success");
   };
 
   renderUnbilledRows(store, period);
 }
 
-function openTopProjectsModal(openList) {
-  const byProject = {};
-  for (const u of openList) byProject[u.project] = (byProject[u.project] || 0) + u.balance;
-  const ranked = Object.entries(byProject).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const rows = ranked.map(([p, amt], i) => `
-    <div class="vendor-rank"><span><span class="n">${i + 1}</span>${escapeHtml(p)}</span><span class="amt">${fmtMoney(amt)}</span></div>
+function openTopUnbilledCustomersModal(openList) {
+  const byCustomer = {};
+  for (const u of openList) byCustomer[u.customer] = (byCustomer[u.customer] || 0) + u.balance;
+  const ranked = Object.entries(byCustomer).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const rows = ranked.map(([c, amt], i) => `
+    <div class="vendor-rank"><span><span class="n">${i + 1}</span>${escapeHtml(c)}</span><span class="amt">${fmtMoney(amt)}</span></div>
   `).join("") || `<div class="meta">No open unbilled lines yet.</div>`;
   openModal(`
     <button type="button" class="modal-close-x" id="insight-close">✕</button>
-    <h3>🏆 Top 5 Project Balances</h3>
+    <h3>🏆 Top 5 Customer Balances — Unbilled</h3>
     ${rows}
   `, { onMount: (host) => { host.querySelector("#insight-close").onclick = closeModal; } });
 }
@@ -1004,13 +1008,14 @@ function renderUnbilledRows(store, period) {
   let list = state.unbilledReceivables || [];
   if (ubFilter === "open") list = list.filter((u) => u.status === "open");
   if (ubFilter === "closed") list = list.filter((u) => u.status === "closed");
-  if (ubSearch) list = list.filter((u) => `${u.project} ${u.description || ""}`.toLowerCase().includes(ubSearch));
-  if (ubProjectFilter) list = list.filter((u) => u.project === ubProjectFilter);
+  if (ubSearch) list = list.filter((u) => `${u.projectNumber || ""} ${u.project || ""} ${u.customer || ""}`.toLowerCase().includes(ubSearch));
+  if (ubCustomerFilter) list = list.filter((u) => u.customer === ubCustomerFilter);
+  if (ubWindowFilter) list = list.filter((u) => u.forecastWindow === ubWindowFilter);
   list = list.slice().sort((a, b) => {
     let cmp;
     if (ubSortBy === "date") cmp = (a.date || "").localeCompare(b.date || "");
-    else cmp = customerSortKey(a.project).localeCompare(customerSortKey(b.project));
-    if (cmp === 0) cmp = customerSortKey(a.project).localeCompare(customerSortKey(b.project)) || (a.date || "").localeCompare(b.date || "");
+    else cmp = customerSortKey(a.customer).localeCompare(customerSortKey(b.customer));
+    if (cmp === 0) cmp = customerSortKey(a.customer).localeCompare(customerSortKey(b.customer)) || (a.date || "").localeCompare(b.date || "");
     return ubSortDir === "desc" ? -cmp : cmp;
   });
 
@@ -1027,19 +1032,26 @@ function renderUnbilledRows(store, period) {
 
   document.getElementById("ub-count").textContent = `${list.length} rows`;
   const tbody = document.getElementById("ub-tbody");
-  if (!list.length) { tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><h4>No unbilled receivables yet</h4>Import a project revenue forecast, or add a line manually.</div></td></tr>`; return; }
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><h4>No unbilled receivables yet</h4>Import a project revenue forecast, or add a line manually.</div></td></tr>`; return; }
 
   tbody.innerHTML = list.map((u) => {
     const days = u.date ? Math.round((parseISO(u.cfDate || u.date) - parseISO(u.date)) / 86400000) : "";
     const whoBadge = u.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(u.lastEditBy)}">${escapeHtml(u.lastEditBy)}</span>` : "";
     const daysVal = u.uncertain ? "unc" : (u.daysOverride ?? days);
+    const windowBadge = u.forecastWindow ? `<span class="window-badge">${u.forecastWindow === "4wk" ? "4-WK" : "8-WK"}</span>` : "—";
     return `<tr class="${u.status === "closed" ? "paid" : ""} ${u.uncertain ? "uncertain-row" : ""}" data-id="${u.id}">
-      <td class="name">${escapeHtml(u.project)}</td>
-      <td>${escapeHtml(u.description || "—")}</td>
+      <td class="name">${escapeHtml(u.customer || "—")}</td>
+      <td>${u.projectNumber ? `<span class="mono" style="color:var(--text-dim);">${escapeHtml(u.projectNumber)}</span> ` : ""}${escapeHtml(u.project || "—")}</td>
+      <td>${windowBadge}</td>
       <td class="mono">${fmtDate(u.date)}</td>
+      <td>
+        <select class="mini-select bill-pct">
+          ${BILL_PERCENTS.map((p) => `<option value="${p}" ${Number(u.billPercent) === p ? "selected" : ""}>${p}%</option>`).join("")}
+        </select>
+      </td>
       <td><input class="mini-input days-input ${u.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the date is uncertain" ${u.status !== "open" ? "disabled" : ""}/></td>
       <td class="mono cf-date">${u.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (u.cfDate ? fmtDate(u.cfDate) : "—")}${whoBadge}</td>
-      <td class="num balance-cell" title="Click to correct this line's amount directly">${fmtMoney(u.balance)}</td>
+      <td class="num balance-cell" title="Click to correct this line's amount directly">${fmtMoney(u.balance)}${u.originalBalance && u.originalBalance !== u.balance ? `<div class="partial-note" style="color:var(--text-dim);">${fmtMoney(u.originalBalance)} at 100%</div>` : ""}</td>
       <td><span class="badge ${u.status === "open" ? "open" : "paid"}">${u.status}</span></td>
       <td>
         <button class="mini-btn toggle-status">${u.status === "open" ? "Mark Closed" : "Reopen"}</button>
@@ -1054,6 +1066,15 @@ function renderUnbilledRows(store, period) {
     if (!rec) return;
     attachItemNotePencil(tr.querySelector(".name"), store, "unbilledReceivables", id);
 
+    tr.querySelector(".bill-pct")?.addEventListener("change", (e) => {
+      const pct = Number(e.target.value);
+      store.mutate((s) => {
+        const item = s.unbilledReceivables.find((x) => x.id === id);
+        item.billPercent = pct;
+        item.balance = Math.round((item.originalBalance ?? item.balance) * (pct / 100) * 100) / 100;
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+      });
+    });
     tr.querySelector(".days-input")?.addEventListener("change", (e) => {
       const raw = e.target.value.trim();
       store.mutate((s) => {
@@ -1090,8 +1111,7 @@ function renderUnbilledRows(store, period) {
         store.mutate((s) => {
           const item = s.unbilledReceivables.find((x) => x.id === id);
           if (!item || Number.isNaN(val) || val < 0) return;
-          item.balance = Math.round(val * 100) / 100;
-          item.originalBalance = item.balance;
+          item.balance = Math.round(val * 100) / 100; // manual override — no longer tied to the bill % multiplier
           item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
         });
       };
@@ -1099,7 +1119,7 @@ function renderUnbilledRows(store, period) {
       input.addEventListener("blur", commit, { once: true });
     });
     tr.querySelector(".del-row")?.addEventListener("click", () => {
-      if (!confirm(`Remove this unbilled line for ${rec.project}?`)) return;
+      if (!confirm(`Remove this unbilled line for ${rec.customer}${rec.project ? " · " + rec.project : ""}?`)) return;
       store.mutate((s) => { s.unbilledReceivables = s.unbilledReceivables.filter((x) => x.id !== id); });
     });
     tr.querySelector(".cf-date")?.addEventListener("click", () => {
@@ -1124,23 +1144,97 @@ function renderUnbilledRows(store, period) {
 function openManualUnbilledModal(store) {
   openModal(`
     <h3>Add Unbilled Line</h3>
+    <div class="row"><label>Customer</label><input id="ub-m-customer" placeholder="Drives auto-schedule, same as Existing AR" /></div>
     <div class="row"><label>Project</label><input id="ub-m-project" /></div>
-    <div class="row"><label>Description</label><input id="ub-m-desc" /></div>
     <div class="row"><label>Invoice Date</label><input id="ub-m-date" type="date" value="${todayISO()}" /></div>
-    <div class="row"><label>Amount</label><input id="ub-m-amt" type="number" /></div>
+    <div class="row"><label>Forecast Amount (100%)</label><input id="ub-m-amt" type="number" /></div>
+    <div class="row"><label>Bill %</label>
+      <select id="ub-m-pct">${BILL_PERCENTS.map((p) => `<option value="${p}" ${p === 100 ? "selected" : ""}>${p}%</option>`).join("")}</select>
+    </div>
     <div class="modal-actions"><button class="btn-ghost" id="ub-m-cancel">Cancel</button><button class="btn-primary" id="ub-m-save" style="width:auto;">Add</button></div>
   `, {
     onMount: (host) => {
       host.querySelector("#ub-m-cancel").onclick = closeModal;
       host.querySelector("#ub-m-save").onclick = () => {
+        const customer = host.querySelector("#ub-m-customer").value.trim();
         const project = host.querySelector("#ub-m-project").value.trim();
-        const description = host.querySelector("#ub-m-desc").value.trim();
         const date = host.querySelector("#ub-m-date").value;
-        const amt = parseFloat(host.querySelector("#ub-m-amt").value || "0");
-        if (!project || !date) { toast("Fill in the required fields", "error"); return; }
+        const originalBalance = parseFloat(host.querySelector("#ub-m-amt").value || "0");
+        const billPercent = Number(host.querySelector("#ub-m-pct").value);
+        if (!customer || !date || !originalBalance) { toast("Fill in customer, date, and amount", "error"); return; }
         store.mutate((s) => {
-          s.unbilledReceivables.push({ id: uid("ub"), project, description, date, balance: amt, originalBalance: amt, status: "open", cfDate: null, daysOverride: null, uncertain: false, source: "manual" });
-          if (!s.projectAutoSchedule[project]) s.projectAutoSchedule[project] = { days: 30, auto: false };
+          createUnbilledLines(s, [{ customer, project, date, originalBalance, billPercent, source: "manual" }]);
+        });
+        closeModal();
+      };
+    },
+  });
+}
+
+function openUnbilledImportReviewModal(store, parsedResult) {
+  const { windows, projects } = parsedResult;
+  const total4 = projects.reduce((a, p) => a + (p.rev4wk || 0), 0);
+  const total8 = projects.reduce((a, p) => a + (p.rev8wk || 0), 0);
+  const has4 = projects.some((p) => p.rev4wk > 0);
+  const has8 = projects.some((p) => p.rev8wk > 0);
+
+  openModal(`
+    <button type="button" class="modal-close-x" id="ubr-close">✕</button>
+    <h3>Import Revenue Forecast</h3>
+    <div class="desc" style="font-size:12.5px;color:var(--text-mid);margin-bottom:14px;line-height:1.6;">
+      Found <strong style="color:var(--text-hi);">${projects.length}</strong> projects with a forecasted amount.
+      Choose which window(s) to bring in as Unbilled Receivable lines — checking both creates two lines per project.
+      You can fine-tune the invoice date, bill %, or amount on individual lines afterward.
+    </div>
+
+    <div class="panel" style="padding:14px;margin-bottom:12px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:700;margin-bottom:8px;">
+        <input type="checkbox" id="ubr-include-4wk" ${has4 ? "checked" : ""} ${has4 ? "" : "disabled"}/>
+        4-Week Forecast — ${projects.filter((p) => p.rev4wk > 0).length} projects · ${fmtMoney(total4)} total
+      </label>
+      <div class="row" style="margin:0 0 6px;"><label>Invoice Date for these lines</label><input type="date" id="ubr-date-4wk" value="${windows.fourWeek.end || todayISO()}" /></div>
+      <div class="row" style="margin:0;"><label>Bill %</label><select id="ubr-pct-4wk">${BILL_PERCENTS.map((p) => `<option value="${p}" ${p === 100 ? "selected" : ""}>${p}%</option>`).join("")}</select></div>
+    </div>
+
+    <div class="panel" style="padding:14px;margin-bottom:14px;">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:700;margin-bottom:8px;">
+        <input type="checkbox" id="ubr-include-8wk" ${has8 ? "checked" : ""} ${has8 ? "" : "disabled"}/>
+        8-Week Forecast — ${projects.filter((p) => p.rev8wk > 0).length} projects · ${fmtMoney(total8)} total
+      </label>
+      <div class="row" style="margin:0 0 6px;"><label>Invoice Date for these lines</label><input type="date" id="ubr-date-8wk" value="${windows.eightWeek.end || todayISO()}" /></div>
+      <div class="row" style="margin:0;"><label>Bill %</label><select id="ubr-pct-8wk">${BILL_PERCENTS.map((p) => `<option value="${p}" ${p === 100 ? "selected" : ""}>${p}%</option>`).join("")}</select></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-ghost" id="ubr-cancel">Cancel</button>
+      <button class="btn-primary" id="ubr-confirm" style="width:auto;">Import</button>
+    </div>
+  `, {
+    closeOnBackdrop: false,
+    onMount: (host) => {
+      host.querySelector("#ubr-close").onclick = closeModal;
+      host.querySelector("#ubr-cancel").onclick = closeModal;
+      host.querySelector("#ubr-confirm").onclick = () => {
+        const include4 = host.querySelector("#ubr-include-4wk").checked;
+        const include8 = host.querySelector("#ubr-include-8wk").checked;
+        const date4 = host.querySelector("#ubr-date-4wk").value;
+        const date8 = host.querySelector("#ubr-date-8wk").value;
+        const pct4 = Number(host.querySelector("#ubr-pct-4wk").value);
+        const pct8 = Number(host.querySelector("#ubr-pct-8wk").value);
+        if (!include4 && !include8) { toast("Check at least one window to import", "error"); return; }
+
+        const specs = [];
+        for (const p of projects) {
+          if (include4 && p.rev4wk > 0) {
+            specs.push({ projectNumber: p.projectNumber, project: p.project, customer: p.customer, forecastWindow: "4wk", originalBalance: p.rev4wk, billPercent: pct4, date: date4 });
+          }
+          if (include8 && p.rev8wk > 0) {
+            specs.push({ projectNumber: p.projectNumber, project: p.project, customer: p.customer, forecastWindow: "8wk", originalBalance: p.rev8wk, billPercent: pct8, date: date8 });
+          }
+        }
+        store.mutate((s) => {
+          const added = createUnbilledLines(s, specs);
+          toast(`Imported ${added} unbilled revenue line${added === 1 ? "" : "s"}`, "success", 5000);
         });
         closeModal();
       };
@@ -1671,12 +1765,10 @@ export function renderSettings(store) {
     store.mutate((s) => { if (!s.manualOutflowCategories.includes(name)) s.manualOutflowCategories.push(name); });
   };
 
-  renderAutoScheduleTable(store, "AR", document.getElementById("ar-auto-list"));
+  renderAutoScheduleTable(store, ["AR", "UNBILLED"], document.getElementById("ar-auto-list"));
   renderAutoScheduleTable(store, "AP", document.getElementById("ap-auto-list"));
-  renderAutoScheduleTable(store, "UNBILLED", document.getElementById("ub-auto-list"));
-  document.getElementById("ar-auto-search").oninput = (e) => renderAutoScheduleTable(store, "AR", document.getElementById("ar-auto-list"), e.target.value.toLowerCase());
+  document.getElementById("ar-auto-search").oninput = (e) => renderAutoScheduleTable(store, ["AR", "UNBILLED"], document.getElementById("ar-auto-list"), e.target.value.toLowerCase());
   document.getElementById("ap-auto-search").oninput = (e) => renderAutoScheduleTable(store, "AP", document.getElementById("ap-auto-list"), e.target.value.toLowerCase());
-  document.getElementById("ub-auto-search").oninput = (e) => renderAutoScheduleTable(store, "UNBILLED", document.getElementById("ub-auto-list"), e.target.value.toLowerCase());
 }
 
 function renderHistory(store) {
@@ -1696,17 +1788,21 @@ function renderHistory(store) {
   }));
 }
 
-function renderAutoScheduleTable(store, kind, host, search = "") {
+function renderAutoScheduleTable(store, kinds, host, search = "") {
   const { state } = store;
-  const { listKey, groupKey, schedKey } = KIND_MAP[kind];
-  const noun = { AR: "receivables", AP: "payables", UNBILLED: "unbilled revenue lines" }[kind];
+  if (typeof kinds === "string") kinds = [kinds];
+  const { schedKey } = KIND_MAP[kinds[0]];
+  const noun = { AR: "receivables", AP: "payables", UNBILLED: "unbilled lines" };
   const names = Object.keys(state[schedKey]).filter((n) => n.toLowerCase().includes(search)).sort();
-  if (!names.length) { host.innerHTML = `<div class="meta" style="padding:14px;">Import ${noun} to populate this list.</div>`; return; }
+  if (!names.length) { host.innerHTML = `<div class="meta" style="padding:14px;">Import ${kinds.map((k) => noun[k]).join(" or ")} to populate this list.</div>`; return; }
 
   const balances = {};
-  for (const item of state[listKey]) {
-    if (item.status !== "open") continue;
-    balances[item[groupKey]] = (balances[item[groupKey]] || 0) + item.balance;
+  for (const kind of kinds) {
+    const { listKey, groupKey } = KIND_MAP[kind];
+    for (const item of state[listKey]) {
+      if (item.status !== "open") continue;
+      balances[item[groupKey]] = (balances[item[groupKey]] || 0) + item.balance;
+    }
   }
 
   host.innerHTML = names.map((name) => {
@@ -1729,7 +1825,7 @@ function renderAutoScheduleTable(store, kind, host, search = "") {
     });
     row.querySelector(".apply-now").addEventListener("click", () => {
       store.mutate((s) => {
-        const n = applyAutoScheduleToGroup(s, kind, name);
+        const n = kinds.reduce((sum, kind) => sum + applyAutoScheduleToGroup(s, kind, name), 0);
         toast(`Updated CF date on ${n} open item${n === 1 ? "" : "s"} for ${name}`, "success");
       });
     });
@@ -1898,14 +1994,11 @@ async function handleUnbilledImportFile(store, input) {
   try {
     const isBinaryWorkbook = /\.xlsx?$/i.test(file.name);
     const parsed = isBinaryWorkbook
-      ? parseProjectForecastWorkbook(await file.arrayBuffer())
-      : parseProjectForecastReport(await file.text());
-    if (!parsed.length) { toast("No project revenue lines found in that file", "error"); return; }
-    store.mutate((s) => {
-      const { added } = mergeUnbilledImport(s, parsed);
-      toast(`Imported ${added} unbilled revenue line${added === 1 ? "" : "s"}`, "success", 5000);
-    });
+      ? parseRevenueForecastWorkbook(await file.arrayBuffer())
+      : parseRevenueForecastReport(await file.text());
+    if (!parsed.projects.length) { toast("No projects with a forecasted amount found in that file", "error"); return; }
+    openUnbilledImportReviewModal(store, parsed);
   } catch (err) {
-    toast(err.message || "Import failed — this parser is a first pass since I haven't seen your actual file format yet. Send it over and I'll tighten this up.", "error", 7000);
+    toast(err.message || "Import failed", "error", 7000);
   }
 }

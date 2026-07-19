@@ -25,9 +25,8 @@ export function defaultState() {
     unbilledReceivables: [], // project-revenue-forecast lines — not yet in NetSuite's Aged AR
     payables: [],
     fixedPayments: [],
-    customerAutoSchedule: {}, // { [customerName]: { days:number, auto:boolean } }
+    customerAutoSchedule: {}, // { [customerName]: { days:number, auto:boolean } } — shared by Existing AR and Unbilled AR
     vendorAutoSchedule: {},
-    projectAutoSchedule: {}, // same idea, keyed by project name, for unbilled receivables
   };
 }
 
@@ -433,7 +432,6 @@ export function mergeStates(local, remote) {
 
   merged.customerAutoSchedule = { ...remote.customerAutoSchedule, ...local.customerAutoSchedule };
   merged.vendorAutoSchedule = { ...remote.vendorAutoSchedule, ...local.vendorAutoSchedule };
-  merged.projectAutoSchedule = { ...(remote.projectAutoSchedule || {}), ...(local.projectAutoSchedule || {}) };
   merged.manualOutflowCategories = Array.from(new Set([...(remote.manualOutflowCategories || []), ...(local.manualOutflowCategories || [])]));
   merged.activePeriodId = local.activePeriodId || remote.activePeriodId;
 
@@ -498,39 +496,46 @@ export function mergeAgingImport(state, kind, parsed) {
   return { added, updated, paidOff };
 }
 
-// Unbilled Receivables don't have a stable natural key to match against on
-// re-import the way NetSuite invoices do (no doc number), so — for now —
-// import always adds fresh lines rather than updating existing ones. Once
-// the real project-forecast file format is settled, this can be tightened
-// to match/update by project the same way mergeAgingImport does for AR/AP.
-export function mergeUnbilledImport(state, parsed) {
+// Creates Unbilled Receivable lines from reviewed import specs — one call per
+// batch (e.g. all the 4-week lines the user chose to include, then again for
+// 8-week). Each spec: { projectNumber, project, customer, forecastWindow,
+// originalBalance, billPercent, date }. balance = originalBalance * billPercent/100.
+// New customers seen here get folded into the same customerAutoSchedule map
+// Existing AR uses, so one "days to pay" setting covers both.
+export function createUnbilledLines(state, specs) {
   let added = 0;
-  for (const rec of parsed) {
-    const tmpl = state.projectAutoSchedule[rec.project];
-    if (!state.projectAutoSchedule[rec.project]) state.projectAutoSchedule[rec.project] = { days: 30, auto: false };
+  for (const spec of specs) {
+    if (!spec.customer || !spec.originalBalance) continue;
+    if (!state.customerAutoSchedule[spec.customer]) state.customerAutoSchedule[spec.customer] = { days: 30, auto: false };
+    const tmpl = state.customerAutoSchedule[spec.customer];
+    const billPercent = spec.billPercent ?? 100;
+    const balance = Math.round(spec.originalBalance * (billPercent / 100) * 100) / 100;
     const item = {
       id: uid("ub"),
-      project: rec.project,
-      description: rec.description || "",
-      date: rec.date,
-      balance: rec.amount,
-      originalBalance: rec.amount,
+      projectNumber: spec.projectNumber || "",
+      project: spec.project || "",
+      customer: spec.customer,
+      forecastWindow: spec.forecastWindow || null, // "4wk" | "8wk" | null (manual entries)
+      originalBalance: spec.originalBalance,
+      billPercent,
+      balance,
+      date: spec.date || null,
       status: "open",
-      cfDate: rec.cfDate || (tmpl?.auto && rec.date ? toISO(addDays(rec.date, tmpl.days || 0)) : null),
+      cfDate: tmpl.auto && spec.date ? toISO(addDays(spec.date, tmpl.days || 0)) : null,
       daysOverride: null,
       uncertain: false,
-      source: "import",
+      source: spec.source || "import",
     };
     state.unbilledReceivables.push(item);
     added++;
   }
-  return { added };
+  return added;
 }
 
 export const KIND_MAP = {
   AR: { listKey: "receivables", groupKey: "customer", schedKey: "customerAutoSchedule" },
   AP: { listKey: "payables", groupKey: "vendor", schedKey: "vendorAutoSchedule" },
-  UNBILLED: { listKey: "unbilledReceivables", groupKey: "project", schedKey: "projectAutoSchedule" },
+  UNBILLED: { listKey: "unbilledReceivables", groupKey: "customer", schedKey: "customerAutoSchedule" },
 };
 
 export function applyAutoScheduleToAll(state, kind) {

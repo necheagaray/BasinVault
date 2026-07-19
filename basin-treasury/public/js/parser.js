@@ -159,83 +159,76 @@ export function parseAgingWorkbook(arrayBuffer, kind) {
 
 // --------------------------------------------------------------------------
 // Project revenue forecast → Unbilled Receivables
-// There's no fixed NetSuite format for this (it's a custom report you'll
-// provide), so instead of matching exact columns like the Aging reports do,
-// this looks for the header row and does best-effort matching against common
-// column-name variants. Once you share a real sample, this can be tightened
-// to match it exactly the same way the Aging parser does.
+// Built against Basin's actual "Revenue Forecast Export" template:
+//   Row 1: title. Row 2: "...4-Week Window: MM/DD/YYYY–MM/DD/YYYY · 8-Week
+//   Window: MM/DD/YYYY–MM/DD/YYYY". Row 5: headers. Row 6+: one row per
+//   project, with "Projected Revenue (4 Wk)" / "(8 Wk)" as the import columns.
 // --------------------------------------------------------------------------
 
-const HEADER_ALIASES = {
-  project: ["project", "project name", "job", "job name", "job #", "project #", "customer:project"],
-  description: ["description", "job description", "scope", "project description", "notes"],
-  date: ["date", "invoice date", "forecast date", "billing date", "expected invoice date"],
-  cfDate: ["cf date", "expected date", "collection date", "expected collection date", "pay date"],
-  amount: ["amount", "revenue", "forecast amount", "projected revenue", "projected amount", "balance", "value"],
-};
+function parseWindowDates(text) {
+  const grab = (label) => {
+    const m = text.match(new RegExp(`${label}\\s*Window:\\s*([\\d/]+)\\s*[–\\-]\\s*([\\d/]+)`, "i"));
+    if (!m) return { start: null, end: null };
+    const toISOFromMDY = (s) => {
+      const [mm, dd, yyyy] = s.split("/");
+      if (!mm || !dd || !yyyy) return null;
+      return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+    };
+    return { start: toISOFromMDY(m[1]), end: toISOFromMDY(m[2]) };
+  };
+  return { fourWeek: grab("4-Week"), eightWeek: grab("8-Week") };
+}
 
-function findColumn(headerRow, aliases) {
-  const lower = headerRow.map((h) => cellStr(h).toLowerCase().trim());
-  for (const alias of aliases) {
-    const idx = lower.indexOf(alias);
-    if (idx !== -1) return idx;
-  }
-  // loose fallback: any header that *contains* one of the alias words
-  for (let i = 0; i < lower.length; i++) {
-    if (aliases.some((a) => lower[i].includes(a))) return i;
+function findHeaderRow(rows) {
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const lower = (rows[i] || []).map((c) => cellStr(c).toLowerCase().trim());
+    if (lower.includes("project #") && lower.includes("customer")) return i;
   }
   return -1;
 }
 
-function extractUnbilledRecords(rows) {
+function extractForecastFromRows(rows) {
   if (!rows.length) throw new Error("That file doesn't have any rows in it.");
-  // find the first row that looks like a header (has a project-ish and amount-ish column)
-  let headerIdx = -1, cols = null;
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    const iProject = findColumn(rows[i], HEADER_ALIASES.project);
-    const iAmount = findColumn(rows[i], HEADER_ALIASES.amount);
-    if (iProject !== -1 && iAmount !== -1) {
-      headerIdx = i;
-      cols = {
-        project: iProject,
-        description: findColumn(rows[i], HEADER_ALIASES.description),
-        date: findColumn(rows[i], HEADER_ALIASES.date),
-        cfDate: findColumn(rows[i], HEADER_ALIASES.cfDate),
-        amount: iAmount,
-      };
-      break;
-    }
-  }
-  if (headerIdx === -1) {
-    throw new Error("Couldn't find a header row with a project/job column and an amount column. Check the file's column names.");
+
+  const infoText = rows.slice(0, 5).map((r) => cellStr(r[0])).join(" ");
+  const windows = parseWindowDates(infoText);
+
+  const headerIdx = findHeaderRow(rows);
+  if (headerIdx === -1) throw new Error("Couldn't find the header row (expected columns like 'Project #' and 'Customer'). Is this the Revenue Forecast Export template?");
+  const header = rows[headerIdx].map((c) => cellStr(c).toLowerCase().trim());
+  const col = (name) => header.indexOf(name);
+  const iNum = col("project #"), iName = col("project name"), iCust = col("customer");
+  const iRev4 = col("projected revenue (4 wk)"), iRev8 = col("projected revenue (8 wk)");
+  if (iNum === -1 || iCust === -1 || (iRev4 === -1 && iRev8 === -1)) {
+    throw new Error("Missing expected columns (Project #, Customer, Projected Revenue (4 Wk)/(8 Wk)). Is this the Revenue Forecast Export template?");
   }
 
-  const records = [];
+  const projects = [];
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r || !r.length) continue;
-    const project = cellStr(r[cols.project]);
-    if (!project) continue;
-    const amount = cellNum(r[cols.amount]);
-    if (!amount) continue;
-    records.push({
-      project,
-      description: cols.description !== -1 ? cellStr(r[cols.description]) : "",
-      date: cols.date !== -1 ? cellDateISO(r[cols.date]) : null,
-      cfDate: cols.cfDate !== -1 ? cellDateISO(r[cols.cfDate]) : null,
-      amount,
+    const projectNumber = cellStr(r[iNum]);
+    if (!projectNumber) continue;
+    const rev4 = iRev4 !== -1 ? cellNum(r[iRev4]) : 0;
+    const rev8 = iRev8 !== -1 ? cellNum(r[iRev8]) : 0;
+    if (!rev4 && !rev8) continue; // nothing projected for this project in either window yet
+    projects.push({
+      projectNumber,
+      project: cellStr(r[iName]),
+      customer: cellStr(r[iCust]),
+      rev4wk: rev4,
+      rev8wk: rev8,
     });
   }
-  return records;
+
+  return { windows, projects };
 }
 
-export function parseProjectForecastReport(text) {
+export function parseRevenueForecastWorkbook(arrayBuffer) {
+  return extractForecastFromRows(parseXlsxRows(arrayBuffer));
+}
+
+export function parseRevenueForecastReport(text) {
   const looksXml = /^\s*<\?xml/.test(text) || text.includes("<Workbook");
-  const rows = looksXml ? parseXmlRows(text) : parseCsvRows(text);
-  return extractUnbilledRecords(rows);
-}
-
-export function parseProjectForecastWorkbook(arrayBuffer) {
-  const rows = parseXlsxRows(arrayBuffer);
-  return extractUnbilledRecords(rows);
+  return extractForecastFromRows(looksXml ? parseXmlRows(text) : parseCsvRows(text));
 }

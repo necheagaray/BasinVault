@@ -116,7 +116,6 @@ const Store = {
       const snap = await api.fetchSnapshot(key);
       this.state = snap.state;
       if (!this.state.unbilledReceivables) this.state.unbilledReceivables = [];
-      if (!this.state.projectAutoSchedule) this.state.projectAutoSchedule = {};
       await this.pushNow();
       this.render();
       toast(`Restored version ${snap.version}`, "success");
@@ -158,7 +157,6 @@ async function boot() {
     }
     if (!remote.manualOutflowCategories.includes("Other")) remote.manualOutflowCategories.push("Other");
     if (!remote.unbilledReceivables) remote.unbilledReceivables = [];
-    if (!remote.projectAutoSchedule) remote.projectAutoSchedule = {};
     Store.state = remote;
     showApp();
     Store.render();
