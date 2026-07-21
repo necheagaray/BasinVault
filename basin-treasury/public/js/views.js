@@ -1537,40 +1537,59 @@ async function copyReceivablesToClipboard(state) {
   const byCustomer = {};
   for (const r of selected) (byCustomer[r.customer] = byCustomer[r.customer] || []).push(r);
   const customers = Object.keys(byCustomer).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
+  const multi = customers.length > 1;
 
-  const lines = [];
-  lines.push("RECEIVABLES");
-  lines.push(`Generated ${fmtDate(todayISO())} · ${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${customers.length} customer${customers.length === 1 ? "" : "s"}`);
-  lines.push("");
-  lines.push(["Customer", "Invoice Date", "Invoice #", "Balance"].join("\t"));
-
+  // Build every row as an array of cell strings first, so column widths can be
+  // measured across the whole table before padding anything — that's what
+  // keeps this lined up when pasted as plain text into an email body, where
+  // tab-stops alone won't line up with variable-width content.
+  const headerCells = ["Customer", "PO #", "Invoice Date", "Invoice #", "Balance"];
+  const dataRows = []; // { cells: [...], isTotal: bool }
   let grandTotal = 0;
+
   customers.forEach((c, ci) => {
     const invoices = byCustomer[c].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const customerTotal = invoices.reduce((a, r) => a + r.balance, 0);
     grandTotal += customerTotal;
 
-    if (customers.length > 1) {
-      lines.push([`${c} — CUSTOMER TOTAL`, "", "", customerTotal].join("\t"));
+    if (multi) {
+      dataRows.push({ cells: [`${c} — CUSTOMER TOTAL`, "", "", "", fmtMoney(customerTotal)], isTotal: true });
       for (const r of invoices) {
-        lines.push(["", r.date ? fmtDate(r.date) : "", r.docNumber || "", r.balance].join("\t"));
+        dataRows.push({ cells: ["", r.poNumber || "—", r.date ? fmtDate(r.date) : "", r.docNumber || "", fmtMoney(r.balance)] });
       }
-      if (ci < customers.length - 1) lines.push(""); // blank spacer row between customer groups
+      if (ci < customers.length - 1) dataRows.push({ cells: null }); // blank spacer row
     } else {
       for (const r of invoices) {
-        lines.push([c, r.date ? fmtDate(r.date) : "", r.docNumber || "", r.balance].join("\t"));
+        dataRows.push({ cells: [c, r.poNumber || "—", r.date ? fmtDate(r.date) : "", r.docNumber || "", fmtMoney(r.balance)] });
       }
     }
   });
+  if (multi) dataRows.push({ cells: ["GRAND TOTAL", "", "", "", fmtMoney(grandTotal)], isTotal: true });
 
-  if (customers.length > 1) {
-    lines.push("");
-    lines.push(["GRAND TOTAL", "", "", grandTotal].join("\t"));
+  const colCount = headerCells.length;
+  const widths = Array(colCount).fill(0);
+  const allRows = [headerCells, ...dataRows.filter((r) => r.cells).map((r) => r.cells)];
+  allRows.forEach((cells) => cells.forEach((cell, i) => { widths[i] = Math.max(widths[i], String(cell).length); }));
+
+  const formatRow = (cells) => cells.map((cell, i) => {
+    const s = String(cell);
+    // right-align the Balance column (last one), left-align everything else
+    return i === colCount - 1 ? s.padStart(widths[i]) : s.padEnd(widths[i]);
+  }).join("   ");
+
+  const lines = [];
+  lines.push("RECEIVABLES");
+  lines.push(`Generated ${fmtDate(todayISO())} · ${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${customers.length} customer${customers.length === 1 ? "" : "s"}`);
+  lines.push("");
+  lines.push(formatRow(headerCells));
+  lines.push(widths.map((w) => "-".repeat(w)).join("   "));
+  for (const row of dataRows) {
+    lines.push(row.cells ? formatRow(row.cells) : "");
   }
 
   const text = lines.join("\n");
 
-  const done = () => toast(`Copied ${selected.length} receivable${selected.length === 1 ? "" : "s"} across ${customers.length} customer${customers.length === 1 ? "" : "s"} — paste into Excel, Slack, or email`, "success", 5000);
+  const done = () => toast(`Copied ${selected.length} receivable${selected.length === 1 ? "" : "s"} across ${customers.length} customer${customers.length === 1 ? "" : "s"} — paste into email, Slack, or Excel`, "success", 5000);
 
   try {
     await navigator.clipboard.writeText(text);
