@@ -1539,71 +1539,93 @@ async function copyReceivablesToClipboard(state) {
   const customers = Object.keys(byCustomer).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
   const multi = customers.length > 1;
 
-  // Build every row as an array of cell strings first, so column widths can be
-  // measured across the whole table before padding anything — that's what
-  // keeps this lined up when pasted as plain text into an email body, where
-  // tab-stops alone won't line up with variable-width content.
-  const headerCells = ["Customer", "PO #", "Invoice Date", "Invoice #", "Balance"];
-  const dataRows = []; // { cells: [...], isTotal: bool }
-  let grandTotal = 0;
+  // Email clients (Outlook, Gmail, Apple Mail, etc.) render pasted content in
+  // whatever proportional font the message already uses — plain-text spacing
+  // can't line up there. So this builds an actual <table> with inline styles
+  // (email HTML has to be inline; <style> blocks get stripped by most clients)
+  // and puts it on the clipboard as real text/html, with a plain-text version
+  // alongside as a fallback for anywhere that only accepts plain text.
+  const th = `padding:7px 12px;text-align:left;font-size:12px;font-family:Arial,Helvetica,sans-serif;color:#555;text-transform:uppercase;letter-spacing:0.03em;border-bottom:2px solid #333;`;
+  const thNum = th + `text-align:right;`;
+  const td = `padding:7px 12px;font-size:13px;font-family:Arial,Helvetica,sans-serif;color:#222;border-bottom:1px solid #e2e2e2;`;
+  const tdNum = td + `text-align:right;font-variant-numeric:tabular-nums;`;
+  const tdTotal = `padding:8px 12px;font-size:13px;font-weight:700;font-family:Arial,Helvetica,sans-serif;color:#111;background:#f5f5f5;border-top:1px solid #ccc;border-bottom:1px solid #ccc;`;
+  const tdTotalNum = tdTotal + `text-align:right;`;
 
-  customers.forEach((c, ci) => {
+  let grandTotal = 0;
+  const bodyRows = [];
+  customers.forEach((c) => {
     const invoices = byCustomer[c].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const customerTotal = invoices.reduce((a, r) => a + r.balance, 0);
     grandTotal += customerTotal;
 
     if (multi) {
-      dataRows.push({ cells: [`${c} — CUSTOMER TOTAL`, "", "", "", fmtMoney(customerTotal)], isTotal: true });
-      for (const r of invoices) {
-        dataRows.push({ cells: ["", r.poNumber || "—", r.date ? fmtDate(r.date) : "", r.docNumber || "", fmtMoney(r.balance)] });
-      }
-      if (ci < customers.length - 1) dataRows.push({ cells: null }); // blank spacer row
-    } else {
-      for (const r of invoices) {
-        dataRows.push({ cells: [c, r.poNumber || "—", r.date ? fmtDate(r.date) : "", r.docNumber || "", fmtMoney(r.balance)] });
-      }
+      bodyRows.push(`<tr>
+        <td style="${tdTotal}" colspan="4">${escapeHtml(c)} — Total</td>
+        <td style="${tdTotalNum}">${fmtMoney(customerTotal)}</td>
+      </tr>`);
+    }
+    for (const r of invoices) {
+      bodyRows.push(`<tr>
+        <td style="${td}">${escapeHtml(multi ? "" : c)}</td>
+        <td style="${td}">${escapeHtml(r.poNumber || "—")}</td>
+        <td style="${td}">${r.date ? fmtDate(r.date) : "—"}</td>
+        <td style="${td}">${escapeHtml(r.docNumber || "—")}</td>
+        <td style="${tdNum}">${fmtMoney(r.balance)}</td>
+      </tr>`);
     }
   });
-  if (multi) dataRows.push({ cells: ["GRAND TOTAL", "", "", "", fmtMoney(grandTotal)], isTotal: true });
-
-  const colCount = headerCells.length;
-  const widths = Array(colCount).fill(0);
-  const allRows = [headerCells, ...dataRows.filter((r) => r.cells).map((r) => r.cells)];
-  allRows.forEach((cells) => cells.forEach((cell, i) => { widths[i] = Math.max(widths[i], String(cell).length); }));
-
-  const formatRow = (cells) => cells.map((cell, i) => {
-    const s = String(cell);
-    // right-align the Balance column (last one), left-align everything else
-    return i === colCount - 1 ? s.padStart(widths[i]) : s.padEnd(widths[i]);
-  }).join("   ");
-
-  const lines = [];
-  lines.push("RECEIVABLES");
-  lines.push(`Generated ${fmtDate(todayISO())} · ${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${customers.length} customer${customers.length === 1 ? "" : "s"}`);
-  lines.push("");
-  lines.push(formatRow(headerCells));
-  lines.push(widths.map((w) => "-".repeat(w)).join("   "));
-  for (const row of dataRows) {
-    lines.push(row.cells ? formatRow(row.cells) : "");
+  if (multi) {
+    bodyRows.push(`<tr>
+      <td style="${tdTotal}" colspan="4">Grand Total</td>
+      <td style="${tdTotalNum}">${fmtMoney(grandTotal)}</td>
+    </tr>`);
   }
 
-  const text = lines.join("\n");
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <table style="border-collapse:collapse;width:100%;max-width:640px;">
+        <thead>
+          <tr>
+            <th style="${th}">Customer</th>
+            <th style="${th}">PO #</th>
+            <th style="${th}">Invoice Date</th>
+            <th style="${th}">Invoice #</th>
+            <th style="${thNum}">Balance</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows.join("")}</tbody>
+      </table>
+    </div>`;
 
-  const done = () => toast(`Copied ${selected.length} receivable${selected.length === 1 ? "" : "s"} across ${customers.length} customer${customers.length === 1 ? "" : "s"} — paste into email, Slack, or Excel`, "success", 5000);
+  // plain-text fallback (tab-separated — fine for pasting into a spreadsheet;
+  // just not what we're optimizing for here)
+  const plainLines = [["Customer", "PO #", "Invoice Date", "Invoice #", "Balance"].join("\t")];
+  customers.forEach((c) => {
+    const invoices = byCustomer[c].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    for (const r of invoices) {
+      plainLines.push([c, r.poNumber || "—", r.date ? fmtDate(r.date) : "", r.docNumber || "", fmtMoney(r.balance)].join("\t"));
+    }
+  });
+  const plainText = plainLines.join("\n");
+
+  const done = () => toast(`Copied ${selected.length} receivable${selected.length === 1 ? "" : "s"} across ${customers.length} customer${customers.length === 1 ? "" : "s"} — paste into an email as a formatted table`, "success", 5000);
 
   try {
-    await navigator.clipboard.writeText(text);
+    if (window.ClipboardItem) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plainText], { type: "text/plain" }),
+        }),
+      ]);
+    } else {
+      await navigator.clipboard.writeText(plainText);
+    }
     done();
   } catch {
     try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
+      await navigator.clipboard.writeText(plainText);
       done();
     } catch {
       toast("Couldn't copy to clipboard — your browser may be blocking it", "error");
