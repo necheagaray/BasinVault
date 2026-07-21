@@ -184,6 +184,7 @@
             <button data-f="paid">Paid</button>
           </div>
           <div class="spacer"></div>
+          <button class="btn-ghost" id="ar-copy-btn">⧉ Copy Selected</button>
           <span class="meta mono" id="ar-count"></span>
         </div>
       </div>
@@ -191,6 +192,7 @@
       <div class="table-scroll">
         <table class="data-table" id="ar-table">
           <thead><tr>
+            <th style="width:30px;"><input type="checkbox" id="ar-select-all" /></th>
             <th class="sortable" data-sort="customer">Customer <span class="sort-arrow"></span></th><th>Type</th><th>Invoice #</th><th class="sortable" data-sort="date">Date <span class="sort-arrow"></span></th><th>PO #</th>
             <th>Days →</th><th>CF Date</th><th>Age</th><th class="num">Balance</th><th>Status</th><th></th>
           </tr></thead>

@@ -574,6 +574,7 @@ function openItemNoteModal(store, listKey, id) {
 /* ============================================================ RECEIVABLES ============================================================ */
 
 let arFilter = "open", arSearch = "", arWeekFilter = null, arCustomerFilter = "";
+const arSelected = new Set();
 let arSortBy = "customer", arSortDir = "asc";
 
 // sorts by the letters in a name only — ignores job/invoice numbers, dashes,
@@ -644,6 +645,7 @@ export function renderReceivables(store) {
 
   document.getElementById("ar-import-btn").onclick = () => document.getElementById("file-input-ar").click();
   document.getElementById("ar-add-btn").onclick = () => openManualInvoiceModal(store, "AR");
+  document.getElementById("ar-copy-btn").onclick = () => copyReceivablesToClipboard(state);
   document.getElementById("ar-clear-btn").onclick = () => {
     if (!state.receivables.length) { toast("Receivables are already empty", "info"); return; }
     if (!confirm(`Delete all ${state.receivables.length} receivable invoices? This can't be undone. Customer auto-schedule settings will be kept.`)) return;
@@ -821,10 +823,10 @@ function renderARRows(store, period) {
   });
 
   const weekLabel = arWeekFilter !== null ? ` · week of ${fmtDate(periodWeeks(period)[arWeekFilter].start)} <button id="ar-week-clear" class="mini-btn" style="margin-left:6px;">✕ clear</button>` : "";
-  document.getElementById("ar-count").innerHTML = `${list.length} rows${weekLabel}`;
+  document.getElementById("ar-count").innerHTML = `${list.length} rows${arSelected.size ? ` · ${arSelected.size} selected` : ""}${weekLabel}`;
   document.getElementById("ar-week-clear")?.addEventListener("click", () => { arWeekFilter = null; renderReceivables(store); });
   const tbody = document.getElementById("ar-tbody");
-  if (!list.length) { tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><h4>No invoices here</h4>Import your Aged AR export or add one manually.</div></td></tr>`; return; }
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><h4>No invoices here</h4>Import your Aged AR export or add one manually.</div></td></tr>`; return; }
 
   tbody.innerHTML = list.map((r) => {
     const days = r.date ? Math.round((parseISO(r.cfDate || r.date) - parseISO(r.date)) / 86400000) : "";
@@ -834,6 +836,7 @@ function renderARRows(store, period) {
     const hasPayments = (r.payments || []).length > 0;
     const hasPartial = paidSoFar > 0 && r.balance > 0;
     return `<tr class="${r.status === "paid" ? "paid" : ""} ${r.uncertain ? "uncertain-row" : ""}" data-id="${r.id}">
+      <td><input type="checkbox" class="row-select" ${arSelected.has(r.id) ? "checked" : ""} /></td>
       <td class="name">${escapeHtml(r.customer)}</td>
       <td>${escapeHtml(r.txnType || "")}</td>
       <td class="mono">${escapeHtml(r.docNumber || "")}</td>
@@ -852,10 +855,23 @@ function renderARRows(store, period) {
     </tr>`;
   }).join("");
 
+  const selectAll = document.getElementById("ar-select-all");
+  selectAll.checked = list.length > 0 && list.every((r) => arSelected.has(r.id));
+  selectAll.onchange = () => {
+    if (selectAll.checked) list.forEach((r) => arSelected.add(r.id));
+    else list.forEach((r) => arSelected.delete(r.id));
+    renderARRows(store, period);
+  };
+
   tbody.querySelectorAll("tr").forEach((tr) => {
     const id = tr.dataset.id;
     const rec = state.receivables.find((x) => x.id === id);
     if (!rec) return;
+    tr.querySelector(".row-select")?.addEventListener("change", (e) => {
+      if (e.target.checked) arSelected.add(id); else arSelected.delete(id);
+      document.getElementById("ar-count").innerHTML = `${list.length} rows${arSelected.size ? ` · ${arSelected.size} selected` : ""}${weekLabel}`;
+      selectAll.checked = list.every((r) => arSelected.has(r.id));
+    });
     attachItemNotePencil(tr.querySelector(".name"), store, "receivables", id);
 
     tr.querySelector(".record-payment")?.addEventListener("click", () => openRecordPaymentModal(store, id));
@@ -1493,6 +1509,68 @@ async function copyPayablesToClipboard(state, period) {
   const text = lines.join("\n");
 
   const done = () => toast(`Copied payment schedule — ${selected.length} invoice${selected.length === 1 ? "" : "s"} across ${vendors.length} vendor${vendors.length === 1 ? "" : "s"} — paste into Excel, Slack, or email`, "success", 5000);
+
+  try {
+    await navigator.clipboard.writeText(text);
+    done();
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      done();
+    } catch {
+      toast("Couldn't copy to clipboard — your browser may be blocking it", "error");
+    }
+  }
+}
+
+async function copyReceivablesToClipboard(state) {
+  const selected = state.receivables.filter((r) => arSelected.has(r.id));
+  if (!selected.length) { toast("Select at least one row first (checkboxes on the left)", "error"); return; }
+
+  const byCustomer = {};
+  for (const r of selected) (byCustomer[r.customer] = byCustomer[r.customer] || []).push(r);
+  const customers = Object.keys(byCustomer).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
+
+  const lines = [];
+  lines.push("RECEIVABLES");
+  lines.push(`Generated ${fmtDate(todayISO())} · ${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${customers.length} customer${customers.length === 1 ? "" : "s"}`);
+  lines.push("");
+  lines.push(["Customer", "Invoice Date", "Invoice #", "Balance"].join("\t"));
+
+  let grandTotal = 0;
+  customers.forEach((c, ci) => {
+    const invoices = byCustomer[c].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const customerTotal = invoices.reduce((a, r) => a + r.balance, 0);
+    grandTotal += customerTotal;
+
+    if (customers.length > 1) {
+      lines.push([`${c} — CUSTOMER TOTAL`, "", "", customerTotal].join("\t"));
+      for (const r of invoices) {
+        lines.push(["", r.date ? fmtDate(r.date) : "", r.docNumber || "", r.balance].join("\t"));
+      }
+      if (ci < customers.length - 1) lines.push(""); // blank spacer row between customer groups
+    } else {
+      for (const r of invoices) {
+        lines.push([c, r.date ? fmtDate(r.date) : "", r.docNumber || "", r.balance].join("\t"));
+      }
+    }
+  });
+
+  if (customers.length > 1) {
+    lines.push("");
+    lines.push(["GRAND TOTAL", "", "", grandTotal].join("\t"));
+  }
+
+  const text = lines.join("\n");
+
+  const done = () => toast(`Copied ${selected.length} receivable${selected.length === 1 ? "" : "s"} across ${customers.length} customer${customers.length === 1 ? "" : "s"} — paste into Excel, Slack, or email`, "success", 5000);
 
   try {
     await navigator.clipboard.writeText(text);
