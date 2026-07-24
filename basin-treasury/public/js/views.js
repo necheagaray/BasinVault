@@ -1475,54 +1475,93 @@ async function copyPayablesToClipboard(state, period) {
 
   const byVendor = {};
   for (const p of selected) (byVendor[p.vendor] = byVendor[p.vendor] || []).push(p);
-  const vendors = Object.keys(byVendor).sort((a, b) => a.localeCompare(b));
+  const vendors = Object.keys(byVendor).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
+  const multi = vendors.length > 1;
+  const exact = (n) => fmtMoney(n, { cents: true }); // exact to the cent — this becomes the actual payment basis
 
-  const lines = [];
-  lines.push("PAYMENT SCHEDULE");
-  lines.push(`Generated ${fmtDate(todayISO())} · ${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${vendors.length} vendor${vendors.length === 1 ? "" : "s"}`);
-  lines.push("");
-  lines.push(["Vendor", "Invoice #", "Date", "Balance", "Pay Run"].join("\t"));
+  // Same approach as the Receivables copy: a real <table> with inline styles
+  // on the clipboard as text/html, since email clients render pasted content
+  // in a proportional font and plain-text column padding won't line up there.
+  const th = `padding:7px 12px;text-align:left;font-size:12px;font-family:Arial,Helvetica,sans-serif;color:#555;text-transform:uppercase;letter-spacing:0.03em;border-bottom:2px solid #333;`;
+  const thNum = th + `text-align:right;`;
+  const td = `padding:7px 12px;font-size:13px;font-family:Arial,Helvetica,sans-serif;color:#222;border-bottom:1px solid #e2e2e2;`;
+  const tdNum = td + `text-align:right;font-variant-numeric:tabular-nums;`;
+  const tdTotal = `padding:8px 12px;font-size:13px;font-weight:700;font-family:Arial,Helvetica,sans-serif;color:#111;background:#f5f5f5;border-top:1px solid #ccc;border-bottom:1px solid #ccc;`;
+  const tdTotalNum = tdTotal + `text-align:right;`;
 
   let grandTotal = 0;
-  vendors.forEach((v, vi) => {
+  const bodyRows = [];
+  vendors.forEach((v) => {
     const invoices = byVendor[v].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const vendorTotal = invoices.reduce((a, p) => a + p.balance, 0);
     grandTotal += vendorTotal;
 
-    lines.push([`${v} — VENDOR TOTAL`, "", "", vendorTotal, `${invoices.length} invoice${invoices.length === 1 ? "" : "s"}`].join("\t"));
+    if (multi) {
+      bodyRows.push(`<tr>
+        <td style="${tdTotal}" colspan="3">${escapeHtml(v)} — Total (${invoices.length} invoice${invoices.length === 1 ? "" : "s"})</td>
+        <td style="${tdTotalNum}">${exact(vendorTotal)}</td>
+      </tr>`);
+    }
     for (const p of invoices) {
       const eff = effectivePayableDate(state, period, p);
-      lines.push([
-        "",
-        p.docNumber || "",
-        p.date ? fmtDate(p.date) : "",
-        p.balance,
-        eff ? `${fmtDate(eff)}${p.payWhenPaid ? " (PWP)" : ""}` : "Unscheduled",
-      ].join("\t"));
+      const payRun = eff ? `${fmtDate(eff)}${p.payWhenPaid ? " (PWP)" : ""}` : "Unscheduled";
+      bodyRows.push(`<tr>
+        <td style="${td}">${escapeHtml(multi ? "" : v)}</td>
+        <td style="${td}">${escapeHtml(p.docNumber || "—")}</td>
+        <td style="${td}">${p.date ? fmtDate(p.date) : "—"} <span style="color:#888;">· ${escapeHtml(payRun)}</span></td>
+        <td style="${tdNum}">${exact(p.balance)}</td>
+      </tr>`);
     }
-    if (vi < vendors.length - 1) lines.push(""); // blank spacer row between vendor groups
   });
+  if (multi) {
+    bodyRows.push(`<tr>
+      <td style="${tdTotal}" colspan="3">Grand Total (${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${vendors.length} vendors)</td>
+      <td style="${tdTotalNum}">${exact(grandTotal)}</td>
+    </tr>`);
+  }
 
-  lines.push("");
-  lines.push(["GRAND TOTAL", "", "", grandTotal, `${selected.length} invoice${selected.length === 1 ? "" : "s"} · ${vendors.length} vendor${vendors.length === 1 ? "" : "s"}`].join("\t"));
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;">
+      <table style="border-collapse:collapse;width:100%;max-width:640px;">
+        <thead>
+          <tr>
+            <th style="${th}">Vendor</th>
+            <th style="${th}">Invoice #</th>
+            <th style="${th}">Date · Pay Run</th>
+            <th style="${thNum}">Balance</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows.join("")}</tbody>
+      </table>
+    </div>`;
 
-  const text = lines.join("\n");
+  const plainLines = [["Vendor", "Invoice #", "Date", "Pay Run", "Balance"].join("\t")];
+  vendors.forEach((v) => {
+    const invoices = byVendor[v].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    for (const p of invoices) {
+      const eff = effectivePayableDate(state, period, p);
+      plainLines.push([v, p.docNumber || "—", p.date ? fmtDate(p.date) : "", eff ? fmtDate(eff) : "Unscheduled", exact(p.balance)].join("\t"));
+    }
+  });
+  const plainText = plainLines.join("\n");
 
-  const done = () => toast(`Copied payment schedule — ${selected.length} invoice${selected.length === 1 ? "" : "s"} across ${vendors.length} vendor${vendors.length === 1 ? "" : "s"} — paste into Excel, Slack, or email`, "success", 5000);
+  const done = () => toast(`Copied payment schedule — ${selected.length} invoice${selected.length === 1 ? "" : "s"} across ${vendors.length} vendor${vendors.length === 1 ? "" : "s"} — paste into an email as a formatted table`, "success", 5000);
 
   try {
-    await navigator.clipboard.writeText(text);
+    if (window.ClipboardItem) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plainText], { type: "text/plain" }),
+        }),
+      ]);
+    } else {
+      await navigator.clipboard.writeText(plainText);
+    }
     done();
   } catch {
     try {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
+      await navigator.clipboard.writeText(plainText);
       done();
     } catch {
       toast("Couldn't copy to clipboard — your browser may be blocking it", "error");
@@ -1562,7 +1601,7 @@ async function copyReceivablesToClipboard(state) {
     if (multi) {
       bodyRows.push(`<tr>
         <td style="${tdTotal}" colspan="4">${escapeHtml(c)} — Total</td>
-        <td style="${tdTotalNum}">${fmtMoney(customerTotal)}</td>
+        <td style="${tdTotalNum}">${fmtMoney(customerTotal, { cents: true })}</td>
       </tr>`);
     }
     for (const r of invoices) {
@@ -1571,14 +1610,14 @@ async function copyReceivablesToClipboard(state) {
         <td style="${td}">${escapeHtml(r.poNumber || "—")}</td>
         <td style="${td}">${r.date ? fmtDate(r.date) : "—"}</td>
         <td style="${td}">${escapeHtml(r.docNumber || "—")}</td>
-        <td style="${tdNum}">${fmtMoney(r.balance)}</td>
+        <td style="${tdNum}">${fmtMoney(r.balance, { cents: true })}</td>
       </tr>`);
     }
   });
   if (multi) {
     bodyRows.push(`<tr>
       <td style="${tdTotal}" colspan="4">Grand Total</td>
-      <td style="${tdTotalNum}">${fmtMoney(grandTotal)}</td>
+      <td style="${tdTotalNum}">${fmtMoney(grandTotal, { cents: true })}</td>
     </tr>`);
   }
 
@@ -1604,7 +1643,7 @@ async function copyReceivablesToClipboard(state) {
   customers.forEach((c) => {
     const invoices = byCustomer[c].slice().sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     for (const r of invoices) {
-      plainLines.push([c, r.poNumber || "—", r.date ? fmtDate(r.date) : "", r.docNumber || "", fmtMoney(r.balance)].join("\t"));
+      plainLines.push([c, r.poNumber || "—", r.date ? fmtDate(r.date) : "", r.docNumber || "", fmtMoney(r.balance, { cents: true })].join("\t"));
     }
   });
   const plainText = plainLines.join("\n");
