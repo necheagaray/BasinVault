@@ -136,7 +136,7 @@ function apPayablesBreakdown(state, period, wi) {
   for (const p of state.payables) {
     if (!matches(p)) continue;
     const bucket = p.status === "paid" ? paidByVendor : openByVendor;
-    bucket[p.vendor] = (bucket[p.vendor] || 0) + p.balance;
+    bucket[p.vendor] = (bucket[p.vendor] || 0) + (p.originalBalance ?? p.balance);
   }
   const toList = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount }));
   const paid = toList(paidByVendor);
@@ -167,7 +167,7 @@ function fixedBreakdown(state, period, rowType, cat, wi) {
     // used for the "Total" column call site, which sums breakdowns across all 5
     // weeks — the per-week cells use apPayablesBreakdown (vendor-grouped, paid/unpaid) instead
     const list = state.payables.filter((p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === wi);
-    return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber + (p.payWhenPaid ? " · PWP" : ""), amount: p.balance })), total: list.reduce((a, p) => a + p.balance, 0) };
+    return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber + (p.payWhenPaid ? " · PWP" : ""), amount: (p.originalBalance ?? p.balance) })), total: list.reduce((a, p) => a + (p.originalBalance ?? p.balance), 0) };
   }
   if (cat === "Payroll" || cat === "401K") {
     const isScheduledWeek = cat === "Payroll" ? payrollWeeksFor(period).includes(wi) : k401WeeksFor(period).includes(wi);

@@ -148,19 +148,20 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
 
   // Anything still open that was sitting in one of the now-dropped weeks is
   // presumed handled by now — close it out so it stops counting toward the
-  // new forecast, but leave it on its tab with its CF date untouched, so
-  // there's still a record of it (and the "fell off the forecast" summary
-  // on the Receivables tab can find it).
+  // new forecast (and stops inflating Total AR/AP), but leave it on its tab
+  // with its CF date untouched, so there's still a record of it.
   const now = new Date().toISOString();
   let rolledOffReceivables = 0, rolledOffAmount = 0;
   for (const r of state.receivables) {
     if (r.status !== "open") continue;
     const wi = weekIndexForDate(old, r.cfDate);
     if (wi === null || wi >= n) continue;
+    if (r.originalBalance === undefined) r.originalBalance = r.balance;
+    rolledOffAmount += r.balance;
     r.status = "paid";
+    r.balance = 0;
     r.updatedAt = now;
     rolledOffReceivables++;
-    rolledOffAmount += r.balance;
   }
   for (const u of state.unbilledReceivables || []) {
     if (u.status !== "open") continue;
@@ -174,10 +175,12 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
     if (p.status !== "open") continue;
     const wi = weekIndexForDate(old, effectivePayableDate(state, old, p));
     if (wi === null || wi >= n) continue;
+    if (p.originalBalance === undefined) p.originalBalance = p.balance;
+    rolledOffPayableAmount += p.balance;
     p.status = "paid";
+    p.balance = 0;
     p.updatedAt = now;
     rolledOffPayables++;
-    rolledOffPayableAmount += p.balance;
   }
 
   return { period: next, rolledOffReceivables, rolledOffAmount, rolledOffPayables, rolledOffPayableAmount };
@@ -323,7 +326,7 @@ export function computeForecast(state, period) {
   for (const p of state.payables) {
     const eff = effectivePayableDate(state, period, p);
     const wi = p.status === "paid" ? weekIndexForDateStrict(period, eff) : weekIndexForDate(period, eff);
-    if (wi !== null) scheduledPayables[wi] += p.balance;
+    if (wi !== null) scheduledPayables[wi] += (p.originalBalance ?? p.balance);
   }
 
   // scheduled fixed-payment totals per category per week
@@ -554,7 +557,12 @@ export function mergeAgingImport(state, kind, parsed) {
   for (const x of list) {
     if (x.status === "open" && x.source === "import") {
       const key = `${x[groupKey]}::${x.docNumber}::${x.date}`;
-      if (!seen.has(key)) { x.status = "paid"; paidOff++; }
+      if (!seen.has(key)) {
+        if (x.originalBalance === undefined) x.originalBalance = x.balance;
+        x.status = "paid";
+        x.balance = 0;
+        paidOff++;
+      }
     }
   }
 
@@ -615,6 +623,7 @@ export function applyAutoScheduleToAll(state, kind) {
   for (const x of state[listKey]) {
     if (x.status !== "open" || x.payWhenPaid) continue;
     const tmpl = state[schedKey][x[groupKey]];
+    if (tmpl?.uncertain) { x.uncertain = true; x.cfDate = null; continue; } // uncertain always wins over auto-schedule
     if (tmpl?.auto && x.date) {
       x.cfDate = clampToCurrentPeriod(state, toISO(addDays(x.date, tmpl.days || 0)));
       count++;
@@ -630,6 +639,7 @@ export function applyAutoScheduleToGroup(state, kind, groupName) {
   let count = 0;
   for (const x of state[listKey]) {
     if (x.status !== "open" || x[groupKey] !== groupName || x.payWhenPaid) continue;
+    if (tmpl.uncertain) { x.uncertain = true; x.cfDate = null; continue; } // uncertain always wins over auto-schedule
     if (x.date) { x.cfDate = clampToCurrentPeriod(state, toISO(addDays(x.date, tmpl.days || 0))); count++; }
   }
   return count;
