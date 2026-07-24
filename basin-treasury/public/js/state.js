@@ -70,63 +70,66 @@ function autoPeriodLabel(startISO) {
   return sm === em ? sm : `${sm}-${em}`;
 }
 
-function shiftWeekMap(map) {
+function shiftWeekMap(map, n) {
   const out = {};
   for (const k of Object.keys(map || {})) {
     const wi = Number(k);
     if (Number.isNaN(wi)) continue;
-    if (wi === 0) continue; // the completed week is dropped
-    out[wi - 1] = map[k];
+    if (wi < n) continue; // completed weeks are dropped
+    out[wi - n] = map[k];
   }
   return out;
 }
 
-function shiftOverrides(ov) {
+function shiftOverrides(ov, n) {
   ov = ov || {};
   const out = {
-    receivablesCollected: shiftWeekMap(ov.receivablesCollected),
-    otherInflows: shiftWeekMap(ov.otherInflows),
-    apPayables: shiftWeekMap(ov.apPayables),
-    locDraw: shiftWeekMap(ov.locDraw),
+    receivablesCollected: shiftWeekMap(ov.receivablesCollected, n),
+    otherInflows: shiftWeekMap(ov.otherInflows, n),
+    apPayables: shiftWeekMap(ov.apPayables, n),
+    locDraw: shiftWeekMap(ov.locDraw, n),
     manualOutflow: {},
     fixedGroup: {},
   };
-  for (const cat of Object.keys(ov.manualOutflow || {})) out.manualOutflow[cat] = shiftWeekMap(ov.manualOutflow[cat]);
-  for (const cat of Object.keys(ov.fixedGroup || {})) out.fixedGroup[cat] = shiftWeekMap(ov.fixedGroup[cat]);
+  for (const cat of Object.keys(ov.manualOutflow || {})) out.manualOutflow[cat] = shiftWeekMap(ov.manualOutflow[cat], n);
+  for (const cat of Object.keys(ov.fixedGroup || {})) out.fixedGroup[cat] = shiftWeekMap(ov.fixedGroup[cat], n);
   return out;
 }
 
-function shiftNotes(notes) {
+function shiftNotes(notes, n) {
   const out = {};
   for (const key of Object.keys(notes || {})) {
     const m = key.match(/^(.*)::([0-4])$/);
     if (!m) { out[key] = notes[key]; continue; } // row-level / total-column notes carry over untouched
     const wi = Number(m[2]);
-    if (wi === 0) continue; // note was on the completed week — drop it with that week
-    out[`${m[1]}::${wi - 1}`] = notes[key];
+    if (wi < n) continue; // note was on a now-completed week — drop it with that week
+    out[`${m[1]}::${wi - n}`] = notes[key];
   }
   return out;
 }
 
-// "Roll forward" a period: drop the completed first week, shift weeks 2-5 up
-// to become weeks 1-4, and open a new week 5 at the end. Returns a brand-new
-// period object (the old one is left alone in history) — caller is responsible
-// for pushing it into state.periods and making it active.
-export function rollForwardPeriod(state, periodId) {
+// "Roll forward" a period by n weeks: drop the first n (completed) weeks,
+// shift the remaining weeks up to fill weeks 1..(5-n), and open n new weeks
+// at the end. Returns a brand-new period object (the old one is left alone
+// in history) — caller is responsible for pushing it into state.periods and
+// making it active.
+export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   const old = state.periods.find((p) => p.id === periodId);
   if (!old) return null;
+  const n = Math.max(1, Math.min(4, Math.round(weeksToRoll)));
 
   const calc = computeForecast(state, old);
-  const newStart = toISO(addDays(old.startDate, 7));
+  const newStart = toISO(addDays(old.startDate, 7 * n));
   const oldPayrollWeeks = payrollWeeksFor(old);
+  const lastDropped = calc.weeks[n - 1]; // the last of the completed weeks being dropped
 
   const next = makePeriod(uid("p"), autoPeriodLabel(newStart), newStart);
-  next.openingCash = Math.round(calc.weeks[0].closing * 100) / 100;
-  next.locOpeningBalance = Math.round(calc.weeks[0].locBalance * 100) / 100;
-  next.payroll = { amount: old.payroll?.amount || 0, firstWeek: oldPayrollWeeks.includes(1) ? 0 : 1 };
+  next.openingCash = Math.round(lastDropped.closing * 100) / 100;
+  next.locOpeningBalance = Math.round(lastDropped.locBalance * 100) / 100;
+  next.payroll = { amount: old.payroll?.amount || 0, firstWeek: oldPayrollWeeks.includes(n) ? 0 : 1 };
   next.k401 = { amount: old.k401?.amount || 0 };
-  next.overrides = shiftOverrides(old.overrides);
-  next.notes = shiftNotes(old.notes);
+  next.overrides = shiftOverrides(old.overrides, n);
+  next.notes = shiftNotes(old.notes, n);
 
   return next;
 }

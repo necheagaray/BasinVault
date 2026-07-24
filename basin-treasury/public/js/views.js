@@ -1991,21 +1991,37 @@ function renderAutoScheduleTable(store, kinds, host, search = "") {
 }
 
 function openRollForwardModal(store, period, calc, weeksMeta) {
-  const newStart = toISO(addDays(period.startDate, 7));
-  const newOpening = calc.weeks[0].closing;
-  const newLoc = calc.weeks[0].locBalance;
+  const buildPreview = (n) => {
+    const newStart = toISO(addDays(period.startDate, 7 * n));
+    const newOpening = calc.weeks[n - 1].closing;
+    const newLoc = calc.weeks[n - 1].locBalance;
+    const droppedRange = n === 1
+      ? `Week 1 (${fmtDateShort(weeksMeta[0].start)}–${fmtDateShort(weeksMeta[0].end)})`
+      : `Weeks 1–${n} (${fmtDateShort(weeksMeta[0].start)}–${fmtDateShort(weeksMeta[n - 1].end)})`;
+    const remaining = 5 - n;
+    return `
+      This starts a new forecast on <strong style="color:var(--text-hi);">${fmtDate(newStart)}</strong>.
+      ${droppedRange} ${n === 1 ? "is" : "are"} dropped, the remaining ${remaining} week${remaining === 1 ? "" : "s"} shift up to become week${remaining === 1 ? "" : "s"} 1–${remaining}, and ${n} new week${n === 1 ? "" : "s"} open${n === 1 ? "s" : ""} at the end.
+      <br/><br/>
+      Opening Cash carries forward as <strong style="color:var(--green);">${fmtMoney(newOpening)}</strong> (the closing balance at the end of week ${n}), and LOC Balance carries forward as <strong style="color:var(--indigo);">${fmtMoney(newLoc)}</strong>.
+      Notes and CF dates on the surviving weeks shift with them; notes on the dropped weeks go with them. Receivables and payables aren't touched — anything still open just re-buckets into the new week 1 automatically.
+      <br/><br/>
+      The current period (<strong style="color:var(--text-hi);">${escapeHtml(period.label)}</strong>) is kept in your period history, not deleted.
+    `;
+  };
+
   openModal(`
     <button type="button" class="modal-close-x" id="rf-close">✕</button>
     <h3>⟳ Roll Forward</h3>
-    <div class="desc" style="font-size:12.5px;color:var(--text-mid);margin-bottom:14px;line-height:1.6;">
-      This starts a new forecast on <strong style="color:var(--text-hi);">${fmtDate(newStart)}</strong>.
-      Week 1 (${fmtDateShort(weeksMeta[0].start)}–${fmtDateShort(weeksMeta[0].end)}) is dropped, weeks 2–5 shift up to become weeks 1–4, and a new week 5 opens at the end.
-      <br/><br/>
-      Opening Cash carries forward as <strong style="color:var(--green);">${fmtMoney(newOpening)}</strong> (week 1's closing balance), and LOC Balance carries forward as <strong style="color:var(--indigo);">${fmtMoney(newLoc)}</strong>.
-      Notes and CF dates on weeks 2–5 shift with them; week 1's notes are dropped along with the week. Receivables and payables aren't touched — anything still open just re-buckets into the new week 1 automatically.
-      <br/><br/>
-      The current period (<strong style="color:var(--text-hi);">${escapeHtml(period.label)}</strong>) is kept in your period history, not deleted.
+    <div class="row"><label>Weeks to roll forward</label>
+      <select id="rf-weeks">
+        <option value="1">1 week</option>
+        <option value="2">2 weeks</option>
+        <option value="3">3 weeks</option>
+        <option value="4">4 weeks</option>
+      </select>
     </div>
+    <div class="desc" id="rf-preview" style="font-size:12.5px;color:var(--text-mid);margin-bottom:14px;line-height:1.6;">${buildPreview(1)}</div>
     <div class="row"><label>New Period Label</label><input id="rf-label" value="" placeholder="auto-generated if left blank" /></div>
     <div class="modal-actions">
       <button class="btn-ghost" id="rf-cancel">Cancel</button>
@@ -2016,17 +2032,21 @@ function openRollForwardModal(store, period, calc, weeksMeta) {
     onMount: (host) => {
       host.querySelector("#rf-close").onclick = closeModal;
       host.querySelector("#rf-cancel").onclick = closeModal;
+      host.querySelector("#rf-weeks").addEventListener("change", (e) => {
+        host.querySelector("#rf-preview").innerHTML = buildPreview(Number(e.target.value));
+      });
       host.querySelector("#rf-confirm").onclick = () => {
+        const weeksToRoll = Number(host.querySelector("#rf-weeks").value);
         const customLabel = host.querySelector("#rf-label").value.trim();
         store.mutate((s) => {
-          const next = rollForwardPeriod(s, period.id);
+          const next = rollForwardPeriod(s, period.id, weeksToRoll);
           if (!next) return;
           if (customLabel) next.label = customLabel;
           s.periods.push(next);
           s.activePeriodId = next.id;
         });
         closeModal();
-        toast("Rolled forward to a new period", "success");
+        toast(`Rolled forward ${weeksToRoll} week${weeksToRoll === 1 ? "" : "s"} to a new period`, "success");
       };
     },
   });
