@@ -1,7 +1,7 @@
 import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeModal, uid, todayISO, toISO, addDays, parseISO, daysBetween } from "./util.js";
 import {
   periodWeeks, computeForecast, weekIndexForDate, fixedOccurrencesInPeriod, scheduleLabel,
-  FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor,
+  FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
@@ -166,9 +166,9 @@ function fixedBreakdown(state, period, rowType, cat, wi) {
     return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber + (p.payWhenPaid ? " · PWP" : ""), amount: p.balance })), total: list.reduce((a, p) => a + p.balance, 0) };
   }
   if (cat === "Payroll" || cat === "401K") {
-    const isPayrollWeek = payrollWeeksFor(period).includes(wi);
+    const isScheduledWeek = cat === "Payroll" ? payrollWeeksFor(period).includes(wi) : k401WeeksFor(period).includes(wi);
     const amt = cat === "Payroll" ? (period.payroll?.amount || 0) : (period.k401?.amount || 0);
-    if (isPayrollWeek && amt) return { items: [{ name: cat === "Payroll" ? "Payroll run" : "401K contribution", sub: "biweekly", amount: amt }], total: amt };
+    if (isScheduledWeek && amt) return { items: [{ name: cat === "Payroll" ? "Payroll run" : "401K contribution", sub: "selected week", amount: amt }], total: amt };
     return { items: [], total: 0 };
   }
   const items = [];
@@ -785,7 +785,7 @@ function openRecordPaymentModal(store, id) {
   openModal(`
     <button type="button" class="modal-close-x" id="pay-close">✕</button>
     <h3>💲 Record Payment</h3>
-    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:14px;">${escapeHtml(rec.customer)} · ${escapeHtml(rec.docNumber || "")}<br/>Balance due: <strong style="color:var(--text-hi);">${fmtMoney(rec.balance)}</strong>${paidSoFar ? ` · ${fmtMoney(paidSoFar)} already paid` : ""}</div>
+    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:14px;">${escapeHtml(rec.customer)} · ${escapeHtml(rec.docNumber || "")}<br/>Balance due: <strong style="color:var(--text-hi);">${fmtMoney(rec.balance)}</strong>${paidSoFar ? ` · ${fmtMoney(paidSoFar)} already paid` : ""}<br/><span style="font-size:11px;">A partial payment splits this into a paid line and a separate open line for what's still owed.</span></div>
     <div class="row"><label>Payment Amount</label><input id="pay-amt" type="number" value="${rec.balance}" step="0.01" /></div>
     <div class="row"><label>Payment Date</label><input id="pay-date" type="date" value="${todayISO()}" /></div>
     <div class="modal-actions">
@@ -802,18 +802,45 @@ function openRecordPaymentModal(store, id) {
         const amt = parseFloat(host.querySelector("#pay-amt").value || "0");
         const date = host.querySelector("#pay-date").value || todayISO();
         if (!amt || amt <= 0) { toast("Enter a payment amount greater than $0", "error"); return; }
+        let wasSplit = false, remaining = 0;
         store.mutate((s) => {
           const item = s.receivables.find((x) => x.id === id);
           if (!item) return;
-          item.payments = item.payments || [];
-          item.payments.push({ date, amount: amt });
-          item.balance = Math.max(0, Math.round((item.balance - amt) * 100) / 100);
-          if (item.balance <= 0) { item.balance = 0; item.status = "paid"; }
-          item.lastEditBy = store.initials();
-          item.updatedAt = new Date().toISOString();
+          if (amt >= item.balance) {
+            // full payment (or overpayment) — close this line out, no split needed
+            item.payments = item.payments || [];
+            item.payments.push({ date, amount: amt });
+            item.balance = 0;
+            item.status = "paid";
+            item.lastEditBy = store.initials();
+            item.updatedAt = new Date().toISOString();
+          } else {
+            // partial — split into a closed "paid" line and a smaller open "remaining" line,
+            // so the unpaid portion can be scheduled or closed independently of this payment
+            wasSplit = true;
+            remaining = Math.round((item.balance - amt) * 100) / 100;
+            const paidLine = { ...item };
+            delete paidLine.note; // keep any note on the still-open remaining line, not duplicated
+            paidLine.id = uid("ar");
+            paidLine.docNumber = `${item.docNumber || ""} (Partial Pmt)`.trim();
+            paidLine.balance = 0;
+            paidLine.originalBalance = amt;
+            paidLine.payments = [{ date, amount: amt }];
+            paidLine.status = "paid";
+            paidLine.lastEditBy = store.initials();
+            paidLine.updatedAt = new Date().toISOString();
+
+            item.balance = remaining;
+            item.originalBalance = remaining; // this line is now effectively its own fresh open balance
+            item.payments = [];
+            item.lastEditBy = store.initials();
+            item.updatedAt = new Date().toISOString();
+
+            s.receivables.push(paidLine);
+          }
         });
         closeModal();
-        toast(`Recorded ${fmtMoney(amt)} payment${amt >= rec.balance ? " — invoice paid in full" : ""}`, "success");
+        toast(wasSplit ? `Split: ${fmtMoney(amt)} paid, ${fmtMoney(remaining)} still open on a separate line` : `Recorded ${fmtMoney(amt)} payment — invoice paid in full`, "success");
       };
     },
   });
@@ -1751,39 +1778,47 @@ export function renderFixed(store) {
 
   const weeksMeta = periodWeeks(period);
   const payrollWeeks = payrollWeeksFor(period);
+  const k401Weeks = k401WeeksFor(period);
   const payrollAmt = period.payroll?.amount || 0;
   const k401Amt = period.k401?.amount || 0;
-  const payrollWeekLabel = payrollWeeks.map((wi) => `Wk ${wi + 1}`).join(", ");
+
+  const weekPicker = (kind, selectedWeeks) => `
+    <div class="week-picker" data-kind="${kind}">
+      ${[0, 1, 2, 3, 4].map((wi) => `<button type="button" class="week-toggle ${selectedWeeks.includes(wi) ? "on" : ""}" data-wi="${wi}">Wk ${wi + 1}</button>`).join("")}
+    </div>`;
+
   const payrollPanel = `
     <div class="panel fixed-group">
       <div class="fixed-group-head">
-        <h3>Payroll <span class="count">biweekly</span></h3>
+        <h3>Payroll <span class="count">${payrollWeeks.length} run${payrollWeeks.length === 1 ? "" : "s"} this period</span></h3>
         <span class="total">${fmtMoney(payrollWeeks.length * payrollAmt)} this period</span>
       </div>
       <div class="fixed-item" style="grid-template-columns:1fr 120px;">
         <div>
           <div class="fname">Payroll</div>
-          <div class="fsched">${payrollAmt ? `${payrollWeekLabel}` : "Not set — create a new period to set it"}</div>
+          <div class="fsched">Click a week below to toggle it on/off</div>
         </div>
-        <div class="famt">${fmtMoney(payrollAmt)}<div class="fsched">per run</div></div>
+        <div class="famt fixed-amt-edit" data-kind="payroll" title="Click to edit the amount">${fmtMoney(payrollAmt)}<div class="fsched">per run</div></div>
       </div>
+      ${weekPicker("payroll", payrollWeeks)}
     </div>
     <div class="panel fixed-group">
       <div class="fixed-group-head">
-        <h3>401K <span class="count">biweekly</span></h3>
-        <span class="total">${fmtMoney(payrollWeeks.length * k401Amt)} this period</span>
+        <h3>401K <span class="count">${k401Weeks.length} run${k401Weeks.length === 1 ? "" : "s"} this period</span></h3>
+        <span class="total">${fmtMoney(k401Weeks.length * k401Amt)} this period</span>
       </div>
       <div class="fixed-item" style="grid-template-columns:1fr 120px;">
         <div>
           <div class="fname">401K</div>
-          <div class="fsched">${k401Amt ? `${payrollWeekLabel}` : "Not set — create a new period to set it"}</div>
+          <div class="fsched">Click a week below to toggle it on/off</div>
         </div>
-        <div class="famt">${fmtMoney(k401Amt)}<div class="fsched">per run</div></div>
+        <div class="famt fixed-amt-edit" data-kind="k401" title="Click to edit the amount">${fmtMoney(k401Amt)}<div class="fsched">per run</div></div>
       </div>
+      ${weekPicker("k401", k401Weeks)}
     </div>
   `;
 
-  let periodTotal = payrollWeeks.length * (payrollAmt + k401Amt);
+  let periodTotal = payrollWeeks.length * payrollAmt + k401Weeks.length * k401Amt;
   const host = document.getElementById("fixed-groups");
   host.innerHTML = payrollPanel + categories.filter((c) => c !== "Payroll" && c !== "401K").map((cat) => {
     const items = state.fixedPayments.filter((f) => f.category === cat);
@@ -1817,6 +1852,40 @@ export function renderFixed(store) {
   }).join("") + `<div class="panel fixed-group"><div class="fixed-group-head"><h3>New Category</h3>
       <button class="btn-ghost" id="add-fixed-new-cat">+ Add Item In New Category</button></div></div>`;
 
+
+  host.querySelectorAll(".week-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const kind = btn.closest(".week-picker").dataset.kind; // "payroll" | "k401"
+      const wi = Number(btn.dataset.wi);
+      store.mutate((s) => {
+        const per = s.periods.find((p) => p.id === period.id);
+        const bucket = kind === "payroll" ? per.payroll : per.k401;
+        bucket.weeks = bucket.weeks || [];
+        const idx = bucket.weeks.indexOf(wi);
+        if (idx === -1) bucket.weeks.push(wi); else bucket.weeks.splice(idx, 1);
+      });
+    });
+  });
+  host.querySelectorAll(".fixed-amt-edit").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const kind = cell.dataset.kind;
+      const current = kind === "payroll" ? (period.payroll?.amount || 0) : (period.k401?.amount || 0);
+      const input = document.createElement("input");
+      input.type = "number"; input.step = "0.01"; input.className = "mini-input"; input.style.width = "100px"; input.style.textAlign = "right";
+      input.value = current;
+      cell.innerHTML = ""; cell.appendChild(input); input.focus(); input.select();
+      const commit = () => {
+        const val = parseFloat(input.value);
+        store.mutate((s) => {
+          const per = s.periods.find((p) => p.id === period.id);
+          const bucket = kind === "payroll" ? per.payroll : per.k401;
+          if (!Number.isNaN(val) && val >= 0) bucket.amount = Math.round(val * 100) / 100;
+        });
+      };
+      input.addEventListener("keydown", (e2) => { if (e2.key === "Enter") input.blur(); if (e2.key === "Escape") { input.value = current; input.blur(); } });
+      input.addEventListener("blur", commit, { once: true });
+    });
+  });
 
   host.querySelectorAll(".add-fixed").forEach((b) => b.addEventListener("click", () => openFixedModal(store, { category: b.dataset.cat })));
   document.getElementById("add-fixed-new-cat").addEventListener("click", () => openFixedModal(store, {}));
@@ -2101,18 +2170,8 @@ function openNewPeriodModal(store) {
     <div class="row"><label>Opening Cash</label><input id="np-open" type="number" value="0" /></div>
     <div class="row"><label>Opening LOC Balance</label><input id="np-loc" type="number" value="0" /></div>
     <div class="row"><label>Payroll Amount (per pay run, as a positive number — it'll post as an outflow)</label><input id="np-payroll-amt" type="number" value="0" /></div>
-    <div class="row"><label>First Payroll Falls In</label>
-      <select id="np-payroll-wk">
-        <option value="0">Week 1</option>
-        <option value="1">Week 2</option>
-        <option value="2">Week 3</option>
-        <option value="3">Week 4</option>
-        <option value="4">Week 5</option>
-      </select>
-    </div>
-    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">Payroll is biweekly — the app will automatically post the same amount every 2 weeks after the week you pick.</div>
     <div class="row"><label>401K Amount (per payroll run, as a positive number)</label><input id="np-401k-amt" type="number" value="0" /></div>
-    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">Posts automatically on the same weeks as Payroll.</div>
+    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">Pick which weeks (1–5) each of these actually falls on over on the Fixed Payments tab, right after creating this period — same place you can change it later too.</div>
     <div class="modal-actions"><button class="btn-ghost" id="np-cancel">Cancel</button><button class="btn-primary" id="np-save" style="width:auto;">Create</button></div>
   `, {
     onMount: (host) => {
@@ -2123,15 +2182,14 @@ function openNewPeriodModal(store) {
         const opening = parseFloat(host.querySelector("#np-open").value || "0");
         const loc = parseFloat(host.querySelector("#np-loc").value || "0");
         const payrollAmt = Math.abs(parseFloat(host.querySelector("#np-payroll-amt").value || "0"));
-        const payrollWk = Number(host.querySelector("#np-payroll-wk").value || "0");
         const k401Amt = Math.abs(parseFloat(host.querySelector("#np-401k-amt").value || "0"));
         if (!start) { toast("Pick a start date", "error"); return; }
         store.mutate((s) => {
           const p = makePeriod(uid("p"), label, start);
           p.openingCash = opening;
           p.locOpeningBalance = loc;
-          p.payroll = { amount: payrollAmt, firstWeek: payrollWk };
-          p.k401 = { amount: k401Amt };
+          p.payroll = { amount: payrollAmt, weeks: [] };
+          p.k401 = { amount: k401Amt, weeks: [] };
           s.periods.push(p);
           s.activePeriodId = p.id;
         });

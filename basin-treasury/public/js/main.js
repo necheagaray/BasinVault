@@ -45,6 +45,28 @@ const Store = {
   },
 
   render() {
+    // If the user currently has a text field focused inside the active view
+    // (mid-edit — e.g. typing into a balance cell), rebuilding the DOM right
+    // now would destroy that element and silently drop whatever they were
+    // typing. Defer the render until they finish (blur) instead of pulling
+    // the rug out from under them.
+    const active = document.activeElement;
+    const activeView = document.getElementById(`view-${this.activeView}`);
+    const textLikeTypes = ["text", "number", "date", "search", "email", "tel", "url"];
+    const isEditingField = active && activeView && activeView.contains(active) &&
+      (active.tagName === "TEXTAREA" || (active.tagName === "INPUT" && textLikeTypes.includes(active.type)));
+    if (isEditingField) {
+      this.renderPending = true;
+      if (!this._deferredRenderBound) {
+        this._deferredRenderBound = true;
+        active.addEventListener("blur", () => {
+          this._deferredRenderBound = false;
+          if (this.renderPending) { this.renderPending = false; this.render(); }
+        }, { once: true });
+      }
+      return;
+    }
+
     document.querySelectorAll(".sticky-tooltip, .breakdown-tooltip").forEach((el) => el.remove());
     document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${this.activeView}`));
     document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === this.activeView));
@@ -169,7 +191,7 @@ async function boot() {
 }
 
 function startPolling() {
-  setInterval(() => Store.pullNow({ silent: true }), 20000);
+  setInterval(() => Store.pullNow({ silent: true }), 45000);
   window.addEventListener("focus", () => Store.pullNow({ silent: true }));
   window.addEventListener("resize", debounce(() => syncStickyOffsets(), 150));
 }

@@ -44,8 +44,8 @@ export function makePeriod(id, label, startISO) {
     startDate: startISO,
     openingCash: 0,
     locOpeningBalance: 0,
-    payroll: { amount: 0, firstWeek: 0 },
-    k401: { amount: 0 },
+    payroll: { amount: 0, weeks: [] }, // weeks = array of week indices (0-4) the run posts on — manually chosen
+    k401: { amount: 0, weeks: [] },
     notes: {},
     overrides: {
       receivablesCollected: {},
@@ -108,6 +108,10 @@ function shiftNotes(notes, n) {
   return out;
 }
 
+function shiftWeeksArray(weeks, n) {
+  return (weeks || []).filter((w) => w >= n).map((w) => w - n);
+}
+
 // "Roll forward" a period by n weeks: drop the first n (completed) weeks,
 // shift the remaining weeks up to fill weeks 1..(5-n), and open n new weeks
 // at the end. Returns a brand-new period object (the old one is left alone
@@ -120,14 +124,13 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
 
   const calc = computeForecast(state, old);
   const newStart = toISO(addDays(old.startDate, 7 * n));
-  const oldPayrollWeeks = payrollWeeksFor(old);
   const lastDropped = calc.weeks[n - 1]; // the last of the completed weeks being dropped
 
   const next = makePeriod(uid("p"), autoPeriodLabel(newStart), newStart);
   next.openingCash = Math.round(lastDropped.closing * 100) / 100;
   next.locOpeningBalance = Math.round(lastDropped.locBalance * 100) / 100;
-  next.payroll = { amount: old.payroll?.amount || 0, firstWeek: oldPayrollWeeks.includes(n) ? 0 : 1 };
-  next.k401 = { amount: old.k401?.amount || 0 };
+  next.payroll = { amount: old.payroll?.amount || 0, weeks: shiftWeeksArray(old.payroll?.weeks, n) };
+  next.k401 = { amount: old.k401?.amount || 0, weeks: shiftWeeksArray(old.k401?.weeks, n) };
   next.overrides = shiftOverrides(old.overrides, n);
   next.notes = shiftNotes(old.notes, n);
 
@@ -193,10 +196,11 @@ export function fixedOccurrencesInPeriod(item, period) {
 function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 
 export function payrollWeeksFor(period) {
-  const weeks = [];
-  const firstWeek = period.payroll?.firstWeek ?? 0;
-  for (let wi = firstWeek; wi < WEEKS_PER_PERIOD; wi += 2) weeks.push(wi);
-  return weeks;
+  return (period.payroll?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD).sort((a, b) => a - b);
+}
+
+export function k401WeeksFor(period) {
+  return (period.k401?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD).sort((a, b) => a - b);
 }
 
 // "Pay when paid" — a payable's CF date is derived from the next pay run after
@@ -260,15 +264,11 @@ export function computeForecast(state, period) {
   const scheduledFixed = {};
   for (const cat of fixedCategories) scheduledFixed[cat] = Array(WEEKS_PER_PERIOD).fill(0);
 
-  // payroll is period-specific (biweekly starting from the week chosen when the forecast was created)
+  // payroll and 401K each post on whichever weeks were manually selected for this period
   const payrollAmount = period.payroll?.amount || 0;
   const k401Amount = period.k401?.amount || 0;
-  if (payrollAmount || k401Amount) {
-    for (const wi of payrollWeeksFor(period)) {
-      if (payrollAmount) scheduledFixed.Payroll[wi] += payrollAmount;
-      if (k401Amount) scheduledFixed["401K"][wi] += k401Amount;
-    }
-  }
+  if (payrollAmount) for (const wi of payrollWeeksFor(period)) scheduledFixed.Payroll[wi] += payrollAmount;
+  if (k401Amount) for (const wi of k401WeeksFor(period)) scheduledFixed["401K"][wi] += k401Amount;
 
   for (const item of state.fixedPayments) {
     if (item.active === false) continue;
