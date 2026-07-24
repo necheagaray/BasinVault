@@ -741,6 +741,9 @@ input[type=checkbox]{ accent-color:var(--brass); width:15px; height:15px; }
 .tag-active{ font-size:9.5px; color:var(--green); border:1px solid #2c5a44; padding:2px 7px; border-radius:10px; margin-left:8px; text-transform:uppercase; letter-spacing:0.06em;}
 
 .auto-row{ display:grid; grid-template-columns:1.3fr 110px 90px 70px 80px; gap:12px; align-items:center; padding:9px 16px; border-bottom:1px solid var(--line); font-size:12.5px;}
+.auto-row.with-unc{ grid-template-columns:1.1fr 100px 80px 60px 80px 70px; }
+.toggle.unc-toggle.on{ background:var(--amber-dim); border-color:var(--amber); box-shadow:0 0 6px rgba(224,168,63,0.4); }
+.toggle.unc-toggle.on .dot{ background:var(--amber); }
 .auto-row.head{ color:var(--brass-bright); text-transform:uppercase; font-size:10.5px; letter-spacing:0.1em; font-family:var(--font-mono); font-weight:700; border-bottom:2px solid var(--brass-dim); padding-bottom:10px; }
 .auto-balance{ color:var(--text-mid); text-align:right; }
 .toggle{ position:relative; width:36px; height:20px; background:var(--bg-raised); border-radius:12px; border:1px solid var(--line); cursor:pointer; flex-shrink:0;}

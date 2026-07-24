@@ -638,25 +638,17 @@ export function renderReceivables(store) {
   const uncertainList = openList.filter((r) => r.uncertain);
   const uncertainTotal = uncertainList.reduce((a, r) => a + r.balance, 0);
 
-  const rolledOffList = state.receivables.filter((r) => r.status === "paid" && r.cfDate && r.cfDate < period.startDate);
-  const rolledOffTotal = rolledOffList.reduce((a, r) => a + (r.originalBalance ?? r.balance), 0);
-
   document.getElementById("ar-meta").textContent = `${state.receivables.length} invoices · ${openList.length} open`;
   document.getElementById("ar-stats").innerHTML = `
     <div class="stat-card"><div class="label">Total AR</div><div class="value">${fmtMoney(totalAR)}</div></div>
     <div class="stat-card"><div class="label">Open / Uncollected</div><div class="value">${fmtMoney(openAR)}</div></div>
     <div class="stat-card"><div class="label">Scheduled This Period</div><div class="value green">${fmtMoney(weeks.reduce((a, w) => a + openList.filter((r) => weekIndexForDate(period, r.cfDate) === w.index).reduce((s, r) => s + r.balance, 0), 0))}</div></div>
     <div class="stat-card sc-unc"><div class="label">Uncertain</div><div class="value amber">${fmtMoney(uncertainTotal)}</div></div>
-    <div class="stat-card sc-loc"><div class="label">Collected — Prior Weeks</div><div class="value indigo">${fmtMoney(rolledOffTotal)}</div></div>
   `;
 
   const insightsHost = document.getElementById("ar-insights");
-  insightsHost.innerHTML = `
-    <button type="button" class="insight-btn" id="ar-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>
-    ${rolledOffList.length ? `<button type="button" class="insight-btn" id="ar-insight-rolledoff"><span class="icon">📦</span>Collected in Prior Weeks (${rolledOffList.length})<span class="arrow">▸</span></button>` : ""}
-  `;
+  insightsHost.innerHTML = `<button type="button" class="insight-btn" id="ar-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>`;
   document.getElementById("ar-insight-customers").onclick = () => openTopCustomersModal(openList);
-  document.getElementById("ar-insight-rolledoff")?.addEventListener("click", () => openRolledOffModal(rolledOffList, rolledOffTotal));
 
   const collectRow = document.getElementById("ar-collect-row");
   collectRow.innerHTML = weeks.map((w) => {
@@ -855,24 +847,6 @@ function openRecordPaymentModal(store, id) {
         toast(wasSplit ? `Split: ${fmtMoney(amt)} paid, ${fmtMoney(remaining)} still open on a separate line` : `Recorded ${fmtMoney(amt)} payment — invoice paid in full`, "success");
       };
     },
-  });
-}
-
-function openRolledOffModal(list, total) {
-  const sorted = list.slice().sort((a, b) => (b.cfDate || "").localeCompare(a.cfDate || ""));
-  const rows = sorted.map((r) => `
-    <div class="vendor-rank"><span>${escapeHtml(r.customer)} <span style="color:var(--text-dim);">· ${escapeHtml(r.docNumber || "")} · ${fmtDate(r.cfDate)}</span></span><span class="amt">${fmtMoney(r.originalBalance ?? r.balance)}</span></div>
-  `).join("") || `<div class="meta">Nothing here yet.</div>`;
-  openModal(`
-    <button type="button" class="modal-close-x" id="ro-close">✕</button>
-    <h3>📦 Collected in Prior Weeks</h3>
-    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">
-      Invoices marked paid when a Roll Forward moved past their CF date. ${fmtMoney(total)} total across ${list.length} invoice${list.length === 1 ? "" : "s"} — no longer counted on the CF Forecast, but kept here for the record.
-    </div>
-    <div class="breakdown-modal-body">${rows}</div>
-  `, {
-    closeOnBackdrop: false,
-    onMount: (host) => { host.querySelector("#ro-close").onclick = closeModal; },
   });
 }
 
@@ -1481,14 +1455,21 @@ function renderAPRows(store, period) {
   if (!list.length) { tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><h4>No bills here</h4>Import your Aged AP export or add one manually.</div></td></tr>`; return; }
 
   const openReceivables = state.receivables.filter((r) => r.status === "open").sort((a, b) => (a.customer || "").localeCompare(b.customer || ""));
+  const openUnbilled = (state.unbilledReceivables || []).filter((u) => u.status === "open").sort((a, b) => (a.customer || "").localeCompare(b.customer || ""));
 
   tbody.innerHTML = list.map((p) => {
     const whoBadge = p.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(p.lastEditBy)}">${escapeHtml(p.lastEditBy)}</span>` : "";
     const effDate = effectivePayableDate(state, period, p);
+    const linkedValue = p.payWhenPaid && p.linkedReceivableId ? `${p.linkedReceivableKind === "unbilled" ? "unbilled" : "ar"}:${p.linkedReceivableId}` : "";
     const payrunCell = p.payWhenPaid
       ? `<select class="mini-select pwp-receivable-select">
           <option value="">— pick a receivable —</option>
-          ${openReceivables.map((r) => `<option value="${r.id}" ${p.linkedReceivableId === r.id ? "selected" : ""}>${escapeHtml(r.customer)} — ${escapeHtml(r.docNumber || "")} — ${fmtMoney(r.balance)}${r.cfDate ? " · " + fmtDate(r.cfDate) : " · unscheduled"}</option>`).join("")}
+          <optgroup label="Existing AR">
+            ${openReceivables.map((r) => `<option value="ar:${r.id}" ${linkedValue === `ar:${r.id}` ? "selected" : ""}>${escapeHtml(r.customer)} — ${escapeHtml(r.docNumber || "")} — ${fmtMoney(r.balance)}${r.cfDate ? " · " + fmtDate(r.cfDate) : " · unscheduled"}</option>`).join("")}
+          </optgroup>
+          <optgroup label="Unbilled (not yet invoiced)">
+            ${openUnbilled.map((u) => `<option value="unbilled:${u.id}" ${linkedValue === `unbilled:${u.id}` ? "selected" : ""}>${escapeHtml(u.customer)} — ${escapeHtml(u.project || "")} — ${fmtMoney(u.balance)}${u.cfDate ? " · " + fmtDate(u.cfDate) : " · unscheduled"}</option>`).join("")}
+          </optgroup>
         </select>
         <div class="pwp-result ${effDate ? "" : "unset"}">${effDate ? `→ pays ${fmtDate(effDate)}` : "→ not scheduled (receivable unscheduled)"}</div>`
       : `<select class="mini-select payrun-select">
@@ -1539,14 +1520,16 @@ function renderAPRows(store, period) {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
         item.payWhenPaid = e.target.checked;
-        if (!e.target.checked) item.linkedReceivableId = null;
+        if (!e.target.checked) { item.linkedReceivableId = null; item.linkedReceivableKind = null; }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
     tr.querySelector(".pwp-receivable-select")?.addEventListener("change", (e) => {
+      const [kind, recId] = e.target.value ? e.target.value.split(":") : [null, null];
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
-        item.linkedReceivableId = e.target.value || null;
+        item.linkedReceivableId = recId || null;
+        item.linkedReceivableKind = kind === "unbilled" ? "unbilled" : "ar";
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
@@ -2090,7 +2073,8 @@ function renderAutoScheduleTable(store, kinds, host, search = "") {
   if (typeof kinds === "string") kinds = [kinds];
   const { schedKey } = KIND_MAP[kinds[0]];
   const noun = { AR: "receivables", AP: "payables", UNBILLED: "unbilled lines" };
-  const names = Object.keys(state[schedKey]).filter((n) => n.toLowerCase().includes(search)).sort();
+  const showUncertain = kinds.includes("AR"); // uncertain-invoice-date is an AR/Unbilled concept, not AP
+  const names = Object.keys(state[schedKey]).filter((n) => n.toLowerCase().includes(search)).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
   if (!names.length) { host.innerHTML = `<div class="meta" style="padding:14px;">Import ${kinds.map((k) => noun[k]).join(" or ")} to populate this list.</div>`; return; }
 
   const balances = {};
@@ -2104,11 +2088,12 @@ function renderAutoScheduleTable(store, kinds, host, search = "") {
 
   host.innerHTML = names.map((name) => {
     const t = state[schedKey][name];
-    return `<div class="auto-row" data-name="${escapeHtml(name)}">
+    return `<div class="auto-row ${showUncertain ? "with-unc" : ""}" data-name="${escapeHtml(name)}">
       <span>${escapeHtml(name)}</span>
       <span class="auto-balance mono">${fmtMoney(balances[name] || 0)}</span>
       <input class="mini-input days-in" type="number" value="${t.days}" />
       <span class="toggle ${t.auto ? "on" : ""}"><span class="dot"></span></span>
+      ${showUncertain ? `<span class="toggle unc-toggle ${t.uncertain ? "on" : ""}" title="Mark every open invoice for this customer as uncertain"><span class="dot"></span></span>` : ""}
       <button class="mini-btn apply-now">Apply</button>
     </div>`;
   }).join("");
@@ -2117,8 +2102,30 @@ function renderAutoScheduleTable(store, kinds, host, search = "") {
     row.querySelector(".days-in").addEventListener("change", (e) => {
       store.mutate((s) => { s[schedKey][name].days = Number(e.target.value || 0); });
     });
-    row.querySelector(".toggle").addEventListener("click", () => {
+    row.querySelector(".toggle:not(.unc-toggle)").addEventListener("click", () => {
       store.mutate((s) => { s[schedKey][name].auto = !s[schedKey][name].auto; });
+    });
+    row.querySelector(".unc-toggle")?.addEventListener("click", () => {
+      store.mutate((s) => {
+        const t = s[schedKey][name];
+        t.uncertain = !t.uncertain;
+        let n = 0;
+        for (const kind of kinds) {
+          const { listKey, groupKey } = KIND_MAP[kind];
+          for (const item of s[listKey]) {
+            if (item.status !== "open" || item[groupKey] !== name) continue;
+            if (t.uncertain) {
+              item.uncertain = true;
+              item.cfDate = null;
+              item.daysOverride = null;
+            } else {
+              item.uncertain = false;
+            }
+            n++;
+          }
+        }
+        toast(t.uncertain ? `Marked ${n} open item${n === 1 ? "" : "s"} for ${name} as uncertain` : `Cleared uncertain on ${n} open item${n === 1 ? "" : "s"} for ${name}`, "success");
+      });
     });
     row.querySelector(".apply-now").addEventListener("click", () => {
       store.mutate((s) => {

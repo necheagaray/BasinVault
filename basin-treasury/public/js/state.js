@@ -62,6 +62,18 @@ export function getPeriod(state, id) {
   return state.periods.find((p) => p.id === id) || state.periods[0];
 }
 
+// Auto-schedule computes a CF date from an invoice's own date + a fixed days
+// offset — with no awareness of which forecast period is actually active.
+// If that lands before the current period even starts (e.g. an older invoice
+// with a short days-to-pay template), default it to day 1 of the current
+// forecast instead of leaving a stale in-the-past date sitting there.
+function clampToCurrentPeriod(state, dateISO) {
+  if (!dateISO) return dateISO;
+  const current = getPeriod(state, state.activePeriodId);
+  if (!current) return dateISO;
+  return dateISO < current.startDate ? current.startDate : dateISO;
+}
+
 function autoPeriodLabel(startISO) {
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const start = parseISO(startISO);
@@ -255,10 +267,13 @@ export function k401WeeksFor(period) {
 }
 
 // "Pay when paid" — a payable's CF date is derived from the next pay run after
-// the linked receivable's own CF date, rather than being set directly.
+// the linked receivable's own CF date, rather than being set directly. The
+// link can point at an Existing AR invoice, or an Unbilled Receivables line
+// (for a payable that's pay-when-paid against revenue that isn't billed yet).
 export function effectivePayableDate(state, period, payable) {
   if (!payable.payWhenPaid || !payable.linkedReceivableId) return payable.cfDate;
-  const rec = state.receivables.find((r) => r.id === payable.linkedReceivableId);
+  const list = payable.linkedReceivableKind === "unbilled" ? (state.unbilledReceivables || []) : state.receivables;
+  const rec = list.find((r) => r.id === payable.linkedReceivableId);
   if (!rec || !rec.cfDate) return null;
   const weeks = periodWeeks(period);
   const recDate = parseISO(rec.cfDate);
@@ -518,14 +533,16 @@ export function mergeAgingImport(state, kind, parsed) {
       updated++;
     } else {
       const tmpl = state[schedKey][rec[groupKey]];
+      const isUncertain = kind === "AR" && tmpl?.uncertain;
       const item = {
         id: uid(kind.toLowerCase()),
         ...rec,
         originalBalance: rec.balance,
         payments: [],
         status: "open",
-        cfDate: tmpl?.auto && rec.date ? toISO(addDays(rec.date, tmpl.days || 0)) : null,
+        cfDate: isUncertain ? null : (tmpl?.auto && rec.date ? clampToCurrentPeriod(state, toISO(addDays(rec.date, tmpl.days || 0))) : null),
         daysOverride: null,
+        uncertain: isUncertain || undefined,
         source: "import",
       };
       list.push(item);
@@ -575,9 +592,9 @@ export function createUnbilledLines(state, specs) {
       balance,
       date: spec.date || null,
       status: "open",
-      cfDate: tmpl.auto && spec.date ? toISO(addDays(spec.date, tmpl.days || 0)) : null,
+      cfDate: tmpl.uncertain ? null : (tmpl.auto && spec.date ? clampToCurrentPeriod(state, toISO(addDays(spec.date, tmpl.days || 0))) : null),
       daysOverride: null,
-      uncertain: false,
+      uncertain: !!tmpl.uncertain,
       source: spec.source || "import",
     };
     state.unbilledReceivables.push(item);
@@ -599,7 +616,7 @@ export function applyAutoScheduleToAll(state, kind) {
     if (x.status !== "open" || x.payWhenPaid) continue;
     const tmpl = state[schedKey][x[groupKey]];
     if (tmpl?.auto && x.date) {
-      x.cfDate = toISO(addDays(x.date, tmpl.days || 0));
+      x.cfDate = clampToCurrentPeriod(state, toISO(addDays(x.date, tmpl.days || 0)));
       count++;
     }
   }
@@ -613,7 +630,7 @@ export function applyAutoScheduleToGroup(state, kind, groupName) {
   let count = 0;
   for (const x of state[listKey]) {
     if (x.status !== "open" || x[groupKey] !== groupName || x.payWhenPaid) continue;
-    if (x.date) { x.cfDate = toISO(addDays(x.date, tmpl.days || 0)); count++; }
+    if (x.date) { x.cfDate = clampToCurrentPeriod(state, toISO(addDays(x.date, tmpl.days || 0))); count++; }
   }
   return count;
 }
