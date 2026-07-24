@@ -251,7 +251,6 @@ export function computeForecast(state, period) {
     scheduledReceivables[wi] += (u.originalBalance ?? u.balance);
   }
   for (const p of state.payables) {
-    if (p.status !== "open") continue;
     const wi = weekIndexForDate(period, effectivePayableDate(state, period, p));
     if (wi !== null) scheduledPayables[wi] += p.balance;
   }

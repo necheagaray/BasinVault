@@ -126,9 +126,43 @@ function breakdownPopupHTML(bd, label) {
   `;
 }
 
+function apPayablesBreakdown(state, period, wi) {
+  const matches = (p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === wi;
+  const paidByVendor = {}, openByVendor = {};
+  for (const p of state.payables) {
+    if (!matches(p)) continue;
+    const bucket = p.status === "paid" ? paidByVendor : openByVendor;
+    bucket[p.vendor] = (bucket[p.vendor] || 0) + p.balance;
+  }
+  const toList = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).map(([name, amount]) => ({ name, amount }));
+  const paid = toList(paidByVendor);
+  const open = toList(openByVendor);
+  const totalPaid = paid.reduce((a, x) => a + x.amount, 0);
+  const totalOpen = open.reduce((a, x) => a + x.amount, 0);
+  const totalAll = totalPaid + totalOpen;
+  const pct = totalAll > 0 ? Math.round((totalPaid / totalAll) * 100) : 0;
+  return { paid, open, totalPaid, totalOpen, totalAll, pct };
+}
+
+function apPayablesBreakdownPopupHTML(bd, label) {
+  const rowsHtml = (list, cls) => list
+    .map((v) => `<div class="bd-row ${cls}"><span class="bd-name">${cls === "paid" ? "✓ " : ""}${escapeHtml(v.name)}</span><span class="bd-amt">${fmtMoney(v.amount)}</span></div>`)
+    .join("");
+  return `
+    <div class="bd-header">${escapeHtml(label)}</div>
+    <div class="bd-progress"><div class="bd-progress-fill" style="width:${bd.pct}%"></div></div>
+    <div class="bd-summary">${fmtMoney(bd.totalPaid)} paid of ${fmtMoney(bd.totalAll)} <span class="bd-pct">(${bd.pct}%)</span></div>
+    ${bd.paid.length ? `<div class="bd-section-label">Paid</div>${rowsHtml(bd.paid, "paid")}` : ""}
+    ${bd.open.length ? `<div class="bd-section-label">Not Yet Paid</div>${rowsHtml(bd.open, "open")}` : ""}
+    ${!bd.open.length && !bd.paid.length ? `<div class="bd-empty">No payables scheduled this week</div>` : ""}
+  `;
+}
+
 function fixedBreakdown(state, period, rowType, cat, wi) {
   if (rowType === "apPayables") {
-    const list = state.payables.filter((p) => p.status === "open" && weekIndexForDate(period, effectivePayableDate(state, period, p)) === wi);
+    // used for the "Total" column call site, which sums breakdowns across all 5
+    // weeks — the per-week cells use apPayablesBreakdown (vendor-grouped, paid/unpaid) instead
+    const list = state.payables.filter((p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === wi);
     return { items: list.map((p) => ({ name: p.vendor, sub: p.docNumber + (p.payWhenPaid ? " · PWP" : ""), amount: p.balance })), total: list.reduce((a, p) => a + p.balance, 0) };
   }
   if (cat === "Payroll" || cat === "401K") {
@@ -374,6 +408,12 @@ export function renderForecast(store) {
     tds.forEach((td, idx) => {
       if (idx === 0) return; // label cell, nothing to break down
       const wi = idx === tds.length - 1 ? null : idx - 1; // null = Total column
+      const label = () => `${rowLabel} — ${wi === null ? "Full Period" : `${fmtDateShort(weeksMeta[wi].start)} – ${fmtDateShort(weeksMeta[wi].end)}`}`;
+
+      if (rowType === "apPayables" && wi !== null) {
+        attachBreakdownClick(td, () => apPayablesBreakdown(state, period, wi), label, apPayablesBreakdownPopupHTML);
+        return;
+      }
       attachBreakdownClick(
         td,
         () => {
@@ -384,7 +424,7 @@ export function renderForecast(store) {
           }
           return fixedBreakdown(state, period, rowType, cat, wi);
         },
-        () => `${rowLabel} — ${wi === null ? "Full Period" : `${fmtDateShort(weeksMeta[wi].start)} – ${fmtDateShort(weeksMeta[wi].end)}`}`,
+        label,
         fixedBreakdownPopupHTML
       );
     });
