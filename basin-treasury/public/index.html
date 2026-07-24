@@ -346,7 +346,10 @@
       <div class="panel settings-section">
         <h3>Customer Auto-Schedule</h3>
         <div class="desc">Permanent template — days-from-invoice and the auto-schedule toggle carry into every AR import <strong>and every Unbilled Receivables import/entry</strong> for that customer. Turning on "Uncertain" marks every open invoice for that customer as uncertain (no CF date) instead — useful for customers whose pay timing just isn't predictable. Either is always optional; override any CF date manually at any time.</div>
-        <input type="text" class="mini-input" style="width:220px; margin-bottom:10px;" id="ar-auto-search" placeholder="Search customers…" />
+        <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+          <input type="text" class="mini-input" style="width:220px; margin:0;" id="ar-auto-search" placeholder="Search customers…" />
+          <button class="btn-ghost" id="ar-auto-apply-all">Apply All</button>
+        </div>
         <div class="auto-row head with-unc"><span>Customer</span><span>Balance</span><span>Days</span><span>Auto</span><span>Uncertain</span><span>Apply</span></div>
         <div id="ar-auto-list" style="max-height:360px; overflow:auto;"></div>
       </div>

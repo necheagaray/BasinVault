@@ -971,6 +971,11 @@ function renderARRows(store, period) {
         if (reopening && item.originalBalance !== undefined) {
           const paidSoFar = (item.payments || []).reduce((a, p) => a + p.amount, 0);
           item.balance = Math.max(0, Math.round((item.originalBalance - paidSoFar) * 100) / 100);
+        } else if (!reopening) {
+          // marking paid — zero the balance (nothing left owed); keep originalBalance
+          // for the CF Forecast and history, same convention as Record Payment
+          if (item.originalBalance === undefined) item.originalBalance = item.balance;
+          item.balance = 0;
         }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
@@ -1536,7 +1541,14 @@ function renderAPRows(store, period) {
     tr.querySelector(".toggle-status")?.addEventListener("click", () => {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
+        const reopening = item.status === "paid";
         item.status = item.status === "open" ? "paid" : "open";
+        if (reopening && item.originalBalance !== undefined) {
+          item.balance = item.originalBalance;
+        } else if (!reopening) {
+          if (item.originalBalance === undefined) item.originalBalance = item.balance;
+          item.balance = 0;
+        }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
@@ -2049,6 +2061,12 @@ export function renderSettings(store) {
   renderAutoScheduleTable(store, "AP", document.getElementById("ap-auto-list"));
   document.getElementById("ar-auto-search").oninput = (e) => renderAutoScheduleTable(store, ["AR", "UNBILLED"], document.getElementById("ar-auto-list"), e.target.value.toLowerCase());
   document.getElementById("ap-auto-search").oninput = (e) => renderAutoScheduleTable(store, "AP", document.getElementById("ap-auto-list"), e.target.value.toLowerCase());
+  document.getElementById("ar-auto-apply-all").onclick = () => {
+    store.mutate((s) => {
+      const n = applyAutoScheduleToAll(s, "AR") + applyAutoScheduleToAll(s, "UNBILLED");
+      toast(`Updated CF date on ${n} open item${n === 1 ? "" : "s"} across every customer with Auto turned on`, "success");
+    });
+  };
 }
 
 function renderHistory(store) {
