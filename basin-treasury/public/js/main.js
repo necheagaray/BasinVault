@@ -191,7 +191,7 @@ async function boot() {
 }
 
 function startPolling() {
-  setInterval(() => Store.pullNow({ silent: true }), 45000);
+  setInterval(() => Store.pullNow({ silent: true }), 120000);
   window.addEventListener("focus", () => Store.pullNow({ silent: true }));
   window.addEventListener("resize", debounce(() => syncStickyOffsets(), 150));
 }

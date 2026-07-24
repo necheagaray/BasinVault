@@ -134,7 +134,41 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   next.overrides = shiftOverrides(old.overrides, n);
   next.notes = shiftNotes(old.notes, n);
 
-  return next;
+  // Anything still open that was sitting in one of the now-dropped weeks is
+  // presumed handled by now — close it out so it stops counting toward the
+  // new forecast, but leave it on its tab with its CF date untouched, so
+  // there's still a record of it (and the "fell off the forecast" summary
+  // on the Receivables tab can find it).
+  const now = new Date().toISOString();
+  let rolledOffReceivables = 0, rolledOffAmount = 0;
+  for (const r of state.receivables) {
+    if (r.status !== "open") continue;
+    const wi = weekIndexForDate(old, r.cfDate);
+    if (wi === null || wi >= n) continue;
+    r.status = "paid";
+    r.updatedAt = now;
+    rolledOffReceivables++;
+    rolledOffAmount += r.balance;
+  }
+  for (const u of state.unbilledReceivables || []) {
+    if (u.status !== "open") continue;
+    const wi = weekIndexForDate(old, u.cfDate);
+    if (wi === null || wi >= n) continue;
+    u.status = "closed";
+    u.updatedAt = now;
+  }
+  let rolledOffPayables = 0, rolledOffPayableAmount = 0;
+  for (const p of state.payables) {
+    if (p.status !== "open") continue;
+    const wi = weekIndexForDate(old, effectivePayableDate(state, old, p));
+    if (wi === null || wi >= n) continue;
+    p.status = "paid";
+    p.updatedAt = now;
+    rolledOffPayables++;
+    rolledOffPayableAmount += p.balance;
+  }
+
+  return { period: next, rolledOffReceivables, rolledOffAmount, rolledOffPayables, rolledOffPayableAmount };
 }
 
 export function periodWeeks(period) {
@@ -155,8 +189,25 @@ export function weekIndexForDate(period, dateISO) {
   const d = parseISO(dateISO);
   const firstStart = parseISO(weeks[0].start);
   const lastEnd = parseISO(weeks[weeks.length - 1].end);
-  if (d < firstStart) return 0; // overdue items land in the current/first week
+  if (d < firstStart) return 0; // overdue OPEN items land in the current/first week
   if (d > lastEnd) return null; // outside this forecast window
+  for (const w of weeks) {
+    if (d >= parseISO(w.start) && d <= parseISO(w.end)) return w.index;
+  }
+  return null;
+}
+
+// Same as weekIndexForDate, but never clamps a before-period date into week 0.
+// For a closed/paid item, a date before this period just means it's outside
+// this forecast's timeframe (e.g. it was rolled off in an earlier roll-forward)
+// — it shouldn't reappear as if newly due. Only used for already-closed items.
+export function weekIndexForDateStrict(period, dateISO) {
+  if (!dateISO) return null;
+  const weeks = periodWeeks(period);
+  const d = parseISO(dateISO);
+  const firstStart = parseISO(weeks[0].start);
+  const lastEnd = parseISO(weeks[weeks.length - 1].end);
+  if (d < firstStart || d > lastEnd) return null;
   for (const w of weeks) {
     if (d >= parseISO(w.start) && d <= parseISO(w.end)) return w.index;
   }
@@ -244,7 +295,7 @@ export function computeForecast(state, period) {
   const scheduledReceivables = Array(WEEKS_PER_PERIOD).fill(0);
   const scheduledPayables = Array(WEEKS_PER_PERIOD).fill(0);
   for (const r of state.receivables) {
-    const wi = weekIndexForDate(period, r.cfDate);
+    const wi = r.status === "paid" ? weekIndexForDateStrict(period, r.cfDate) : weekIndexForDate(period, r.cfDate);
     if (wi === null) continue;
     scheduledReceivables[wi] += (r.originalBalance ?? r.balance);
   }
@@ -255,7 +306,8 @@ export function computeForecast(state, period) {
     scheduledReceivables[wi] += (u.originalBalance ?? u.balance);
   }
   for (const p of state.payables) {
-    const wi = weekIndexForDate(period, effectivePayableDate(state, period, p));
+    const eff = effectivePayableDate(state, period, p);
+    const wi = p.status === "paid" ? weekIndexForDateStrict(period, eff) : weekIndexForDate(period, eff);
     if (wi !== null) scheduledPayables[wi] += p.balance;
   }
 

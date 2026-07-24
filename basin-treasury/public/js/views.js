@@ -1,6 +1,6 @@
 import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeModal, uid, todayISO, toISO, addDays, parseISO, daysBetween } from "./util.js";
 import {
-  periodWeeks, computeForecast, weekIndexForDate, fixedOccurrencesInPeriod, scheduleLabel,
+  periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP,
 } from "./state.js";
@@ -81,8 +81,8 @@ function labelCell(period, label, rowType, cat, editable) {
 }
 
 function receivablesBreakdown(state, period, wi /* number or null = whole period */) {
-  const matches = (r) => {
-    const idx = weekIndexForDate(period, r.cfDate);
+  const matchesFor = (r) => {
+    const idx = r.status === "paid" ? weekIndexForDateStrict(period, r.cfDate) : weekIndexForDate(period, r.cfDate);
     if (idx === null) return false;
     return wi === null ? true : idx === wi;
   };
@@ -90,7 +90,7 @@ function receivablesBreakdown(state, period, wi /* number or null = whole period
   const paid = [];
   const open = [];
   for (const r of state.receivables) {
-    if (!matches(r)) continue;
+    if (!matchesFor(r)) continue;
     const paidSoFar = (r.payments || []).reduce((a, p) => a + p.amount, 0);
     if (r.status === "paid") {
       paid.push({ ...r, balance: r.originalBalance ?? r.balance });
@@ -127,7 +127,11 @@ function breakdownPopupHTML(bd, label) {
 }
 
 function apPayablesBreakdown(state, period, wi) {
-  const matches = (p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === wi;
+  const matches = (p) => {
+    const eff = effectivePayableDate(state, period, p);
+    const idx = p.status === "paid" ? weekIndexForDateStrict(period, eff) : weekIndexForDate(period, eff);
+    return idx === wi;
+  };
   const paidByVendor = {}, openByVendor = {};
   for (const p of state.payables) {
     if (!matches(p)) continue;
@@ -634,17 +638,25 @@ export function renderReceivables(store) {
   const uncertainList = openList.filter((r) => r.uncertain);
   const uncertainTotal = uncertainList.reduce((a, r) => a + r.balance, 0);
 
+  const rolledOffList = state.receivables.filter((r) => r.status === "paid" && r.cfDate && r.cfDate < period.startDate);
+  const rolledOffTotal = rolledOffList.reduce((a, r) => a + (r.originalBalance ?? r.balance), 0);
+
   document.getElementById("ar-meta").textContent = `${state.receivables.length} invoices · ${openList.length} open`;
   document.getElementById("ar-stats").innerHTML = `
     <div class="stat-card"><div class="label">Total AR</div><div class="value">${fmtMoney(totalAR)}</div></div>
     <div class="stat-card"><div class="label">Open / Uncollected</div><div class="value">${fmtMoney(openAR)}</div></div>
     <div class="stat-card"><div class="label">Scheduled This Period</div><div class="value green">${fmtMoney(weeks.reduce((a, w) => a + openList.filter((r) => weekIndexForDate(period, r.cfDate) === w.index).reduce((s, r) => s + r.balance, 0), 0))}</div></div>
     <div class="stat-card sc-unc"><div class="label">Uncertain</div><div class="value amber">${fmtMoney(uncertainTotal)}</div></div>
+    <div class="stat-card sc-loc"><div class="label">Collected — Prior Weeks</div><div class="value indigo">${fmtMoney(rolledOffTotal)}</div></div>
   `;
 
   const insightsHost = document.getElementById("ar-insights");
-  insightsHost.innerHTML = `<button type="button" class="insight-btn" id="ar-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>`;
+  insightsHost.innerHTML = `
+    <button type="button" class="insight-btn" id="ar-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>
+    ${rolledOffList.length ? `<button type="button" class="insight-btn" id="ar-insight-rolledoff"><span class="icon">📦</span>Collected in Prior Weeks (${rolledOffList.length})<span class="arrow">▸</span></button>` : ""}
+  `;
   document.getElementById("ar-insight-customers").onclick = () => openTopCustomersModal(openList);
+  document.getElementById("ar-insight-rolledoff")?.addEventListener("click", () => openRolledOffModal(rolledOffList, rolledOffTotal));
 
   const collectRow = document.getElementById("ar-collect-row");
   collectRow.innerHTML = weeks.map((w) => {
@@ -843,6 +855,24 @@ function openRecordPaymentModal(store, id) {
         toast(wasSplit ? `Split: ${fmtMoney(amt)} paid, ${fmtMoney(remaining)} still open on a separate line` : `Recorded ${fmtMoney(amt)} payment — invoice paid in full`, "success");
       };
     },
+  });
+}
+
+function openRolledOffModal(list, total) {
+  const sorted = list.slice().sort((a, b) => (b.cfDate || "").localeCompare(a.cfDate || ""));
+  const rows = sorted.map((r) => `
+    <div class="vendor-rank"><span>${escapeHtml(r.customer)} <span style="color:var(--text-dim);">· ${escapeHtml(r.docNumber || "")} · ${fmtDate(r.cfDate)}</span></span><span class="amt">${fmtMoney(r.originalBalance ?? r.balance)}</span></div>
+  `).join("") || `<div class="meta">Nothing here yet.</div>`;
+  openModal(`
+    <button type="button" class="modal-close-x" id="ro-close">✕</button>
+    <h3>📦 Collected in Prior Weeks</h3>
+    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">
+      Invoices marked paid when a Roll Forward moved past their CF date. ${fmtMoney(total)} total across ${list.length} invoice${list.length === 1 ? "" : "s"} — no longer counted on the CF Forecast, but kept here for the record.
+    </div>
+    <div class="breakdown-modal-body">${rows}</div>
+  `, {
+    closeOnBackdrop: false,
+    onMount: (host) => { host.querySelector("#ro-close").onclick = closeModal; },
   });
 }
 
@@ -2147,15 +2177,19 @@ function openRollForwardModal(store, period, calc, weeksMeta) {
       host.querySelector("#rf-confirm").onclick = () => {
         const weeksToRoll = Number(host.querySelector("#rf-weeks").value);
         const customLabel = host.querySelector("#rf-label").value.trim();
+        let result = null;
         store.mutate((s) => {
-          const next = rollForwardPeriod(s, period.id, weeksToRoll);
-          if (!next) return;
-          if (customLabel) next.label = customLabel;
-          s.periods.push(next);
-          s.activePeriodId = next.id;
+          result = rollForwardPeriod(s, period.id, weeksToRoll);
+          if (!result) return;
+          if (customLabel) result.period.label = customLabel;
+          s.periods.push(result.period);
+          s.activePeriodId = result.period.id;
         });
         closeModal();
-        toast(`Rolled forward ${weeksToRoll} week${weeksToRoll === 1 ? "" : "s"} to a new period`, "success");
+        const bits = [`Rolled forward ${weeksToRoll} week${weeksToRoll === 1 ? "" : "s"}`];
+        if (result?.rolledOffReceivables) bits.push(`${result.rolledOffReceivables} receivable${result.rolledOffReceivables === 1 ? "" : "s"} (${fmtMoney(result.rolledOffAmount)}) marked paid from dropped weeks`);
+        if (result?.rolledOffPayables) bits.push(`${result.rolledOffPayables} payable${result.rolledOffPayables === 1 ? "" : "s"} (${fmtMoney(result.rolledOffPayableAmount)}) marked paid`);
+        toast(bits.join(" — "), "success", 6000);
       };
     },
   });
