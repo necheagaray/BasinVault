@@ -297,7 +297,7 @@ export function renderForecast(store) {
       ${calc.fixedCategories.map((cat) => `
         <tr class="fixed-row" data-row="fixed" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "fixed", cat, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.fixedRows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.fixedRows[cat])}</td></tr>
       `).join("")}
-      <tr class="fixed-row ap-row" data-row="apPayables">${labelCell(period, "◆ Weekly AP Payables", "apPayables", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.apPayables)}</td>`).join("")}<td>${fmtMoney(calc.totals.apPayables)}</td></tr>
+      <tr class="fixed-row ap-row" data-row="apPayables">${labelCell(period, "◆ Weekly AP Payables", "apPayables", null, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from payables' CF dates — not manually editable">${fmtMoney(r.apPayables)}</td>`).join("")}<td title="Computed from payables' CF dates — not manually editable">${fmtMoney(calc.totals.apPayables)}</td></tr>
 
       <tr class="outflow-total" data-row="totalOutflows">${labelCell(period, "Total Outflows", "totalOutflows", null, false)}${weeks.map((r) => `<td class="value-neg">${fmtMoney(r.totalOutflows)}</td>`).join("")}<td class="value-neg">${fmtMoney(calc.totals.totalOutflows)}</td></tr>
 

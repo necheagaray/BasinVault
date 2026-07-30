@@ -373,7 +373,7 @@ export function computeForecast(state, period) {
       fixedTotal += val;
     }
 
-    const apPayables = ovVal(ov, "apPayables", wi, -scheduledPayables[wi]);
+    const apPayables = -scheduledPayables[wi]; // always computed from Payables' CF dates — not manually overridable
     const totalOutflows = manualTotal + fixedTotal + apPayables;
 
     const netCashflow = totalInflows + totalOutflows;
