@@ -2,7 +2,7 @@ import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeMod
 import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor,
-  effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD,
+  effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
 
@@ -693,7 +693,7 @@ export function renderReceivables(store) {
   document.getElementById("ar-clear-btn").onclick = () => {
     if (!state.receivables.length) { toast("Receivables are already empty", "info"); return; }
     if (!confirm(`Delete all ${state.receivables.length} receivable invoices? This can't be undone. Customer auto-schedule settings will be kept.`)) return;
-    store.mutate((s) => { s.receivables = []; });
+    store.mutate((s) => { s.receivables.forEach((x) => recordTombstone(s, "receivables", x.id)); s.receivables = []; });
     toast("All receivables cleared — customer auto-schedule settings kept", "success");
   };
 
@@ -1006,7 +1006,7 @@ function renderARRows(store, period) {
     });
     tr.querySelector(".del-row")?.addEventListener("click", () => {
       if (!confirm(`Remove invoice ${rec.docNumber || ""} for ${rec.customer}?`)) return;
-      store.mutate((s) => { s.receivables = s.receivables.filter((x) => x.id !== id); });
+      store.mutate((s) => { recordTombstone(s, "receivables", id); s.receivables = s.receivables.filter((x) => x.id !== id); });
     });
     tr.querySelector(".cf-date")?.addEventListener("click", () => {
       const input = document.createElement("input");
@@ -1074,7 +1074,7 @@ export function renderUnbilled(store) {
   document.getElementById("ub-clear-btn").onclick = () => {
     if (!list0.length) { toast("Unbilled Receivables are already empty", "info"); return; }
     if (!confirm(`Delete all ${list0.length} unbilled lines? This can't be undone. Customer auto-schedule settings will be kept.`)) return;
-    store.mutate((s) => { s.unbilledReceivables = []; });
+    store.mutate((s) => { s.unbilledReceivables.forEach((x) => recordTombstone(s, "unbilledReceivables", x.id)); s.unbilledReceivables = []; });
     toast("All unbilled receivables cleared — customer auto-schedule settings kept", "success");
   };
 
@@ -1212,7 +1212,7 @@ function renderUnbilledRows(store, period) {
     });
     tr.querySelector(".del-row")?.addEventListener("click", () => {
       if (!confirm(`Remove this unbilled line for ${rec.customer}${rec.project ? " · " + rec.project : ""}?`)) return;
-      store.mutate((s) => { s.unbilledReceivables = s.unbilledReceivables.filter((x) => x.id !== id); });
+      store.mutate((s) => { recordTombstone(s, "unbilledReceivables", id); s.unbilledReceivables = s.unbilledReceivables.filter((x) => x.id !== id); });
     });
     tr.querySelector(".cf-date")?.addEventListener("click", () => {
       const input = document.createElement("input");
@@ -1368,7 +1368,7 @@ export function renderPayables(store) {
     if (!state.payables.length) { toast("Payables are already empty", "info"); return; }
     if (!confirm(`Delete all ${state.payables.length} payable bills? This can't be undone. Vendor auto-schedule settings will be kept.`)) return;
     apSelected.clear();
-    store.mutate((s) => { s.payables = []; });
+    store.mutate((s) => { s.payables.forEach((x) => recordTombstone(s, "payables", x.id)); s.payables = []; });
     toast("All payables cleared — vendor auto-schedule settings kept", "success");
   };
 
@@ -1556,7 +1556,7 @@ function renderAPRows(store, period) {
       const rec = state.payables.find((x) => x.id === id);
       if (!confirm(`Remove bill ${rec.docNumber || ""} for ${rec.vendor}?`)) return;
       apSelected.delete(id);
-      store.mutate((s) => { s.payables = s.payables.filter((x) => x.id !== id); });
+      store.mutate((s) => { recordTombstone(s, "payables", id); s.payables = s.payables.filter((x) => x.id !== id); });
     });
   });
 }
@@ -1930,7 +1930,7 @@ export function renderFixed(store) {
     const id = b.closest(".fixed-item").dataset.id;
     const item = state.fixedPayments.find((f) => f.id === id);
     if (!confirm(`Remove "${item.name}"?`)) return;
-    store.mutate((s) => { s.fixedPayments = s.fixedPayments.filter((f) => f.id !== id); });
+    store.mutate((s) => { recordTombstone(s, "fixedPayments", id); s.fixedPayments = s.fixedPayments.filter((f) => f.id !== id); });
   }));
 }
 
@@ -1966,7 +1966,7 @@ function openFixedModal(store, existing) {
       host.querySelector("#f-cancel").onclick = closeModal;
       host.querySelector("#f-del")?.addEventListener("click", () => {
         if (!confirm("Delete this fixed payment?")) return;
-        store.mutate((s) => { s.fixedPayments = s.fixedPayments.filter((f) => f.id !== existing.id); });
+        store.mutate((s) => { recordTombstone(s, "fixedPayments", existing.id); s.fixedPayments = s.fixedPayments.filter((f) => f.id !== existing.id); });
         closeModal();
       });
       host.querySelector("#f-save").onclick = () => {

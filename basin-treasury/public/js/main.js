@@ -138,6 +138,7 @@ const Store = {
       const snap = await api.fetchSnapshot(key);
       this.state = snap.state;
       if (!this.state.unbilledReceivables) this.state.unbilledReceivables = [];
+      if (!this.state.tombstones) this.state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} };
       await this.pushNow();
       this.render();
       toast(`Restored version ${snap.version}`, "success");
@@ -179,6 +180,7 @@ async function boot() {
     }
     if (!remote.manualOutflowCategories.includes("Other")) remote.manualOutflowCategories.push("Other");
     if (!remote.unbilledReceivables) remote.unbilledReceivables = [];
+    if (!remote.tombstones) remote.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} };
     Store.state = remote;
     showApp();
     Store.render();
@@ -191,7 +193,7 @@ async function boot() {
 }
 
 function startPolling() {
-  setInterval(() => Store.pullNow({ silent: true }), 120000);
+  setInterval(() => Store.pullNow({ silent: true }), 60000);
   window.addEventListener("focus", () => Store.pullNow({ silent: true }));
   window.addEventListener("resize", debounce(() => syncStickyOffsets(), 150));
 }

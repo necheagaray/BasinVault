@@ -27,6 +27,10 @@ export function defaultState() {
     fixedPayments: [],
     customerAutoSchedule: {}, // { [customerName]: { days:number, auto:boolean } } — shared by Existing AR and Unbilled AR
     vendorAutoSchedule: {},
+    // Records deletions ({ [listKey]: { [id]: deletedAtISO } }) so that when two
+    // people's edits get merged, a deleted item doesn't silently reappear just
+    // because the other copy being merged in is older and still has it.
+    tombstones: { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} },
   };
 }
 
@@ -476,17 +480,51 @@ function timeOfRecord(r) {
   return r && r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
 }
 
-function mergeById(localArr, remoteArr) {
+function mergeById(localArr, remoteArr, localTombstones, remoteTombstones) {
   localArr = localArr || [];
   remoteArr = remoteArr || [];
+  localTombstones = localTombstones || {};
+  remoteTombstones = remoteTombstones || {};
   const byId = new Map();
   for (const r of remoteArr) byId.set(r.id, r);
   for (const l of localArr) byId.set(l.id, newerOf(l, byId.get(l.id), timeOfRecord));
+  // A tombstone means "I deleted this" — drop it from the merged result unless
+  // the OTHER side edited it more recently than the deletion happened (in which
+  // case their edit wins and the item survives, rather than silently vanishing).
+  for (const [id, deletedAt] of Object.entries(localTombstones)) {
+    const item = byId.get(id);
+    if (!item) continue;
+    const editedAt = timeOfRecord(item);
+    if (editedAt > new Date(deletedAt).getTime()) continue; // genuinely newer edit from the other side — keep it
+    byId.delete(id);
+  }
+  for (const [id, deletedAt] of Object.entries(remoteTombstones)) {
+    const item = byId.get(id);
+    if (!item) continue;
+    const editedAt = timeOfRecord(item);
+    if (editedAt > new Date(deletedAt).getTime()) continue;
+    byId.delete(id);
+  }
   return Array.from(byId.values());
+}
+
+function mergeTombstones(local, remote) {
+  return { ...(remote || {}), ...(local || {}) };
+}
+
+// Call this whenever an item is deleted (individual delete or Clear All) so a
+// concurrent merge knows it was removed on purpose, not just missing because
+// the other copy being merged in is older.
+export function recordTombstone(state, listKey, id) {
+  if (!state.tombstones) state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} };
+  if (!state.tombstones[listKey]) state.tombstones[listKey] = {};
+  state.tombstones[listKey][id] = new Date().toISOString();
 }
 
 export function mergeStates(local, remote) {
   const merged = { ...remote };
+  const lt = local.tombstones || {};
+  const rt = remote.tombstones || {};
 
   merged.periods = remote.periods.map((rp) => {
     const lp = local.periods.find((p) => p.id === rp.id);
@@ -497,10 +535,17 @@ export function mergeStates(local, remote) {
     if (!merged.periods.find((p) => p.id === lp.id)) merged.periods.push(lp); // period created locally, not yet on server
   }
 
-  merged.receivables = mergeById(local.receivables, remote.receivables);
-  merged.unbilledReceivables = mergeById(local.unbilledReceivables || [], remote.unbilledReceivables || []);
-  merged.payables = mergeById(local.payables, remote.payables);
-  merged.fixedPayments = mergeById(local.fixedPayments, remote.fixedPayments);
+  merged.receivables = mergeById(local.receivables, remote.receivables, lt.receivables, rt.receivables);
+  merged.unbilledReceivables = mergeById(local.unbilledReceivables || [], remote.unbilledReceivables || [], lt.unbilledReceivables, rt.unbilledReceivables);
+  merged.payables = mergeById(local.payables, remote.payables, lt.payables, rt.payables);
+  merged.fixedPayments = mergeById(local.fixedPayments, remote.fixedPayments, lt.fixedPayments, rt.fixedPayments);
+
+  merged.tombstones = {
+    receivables: mergeTombstones(lt.receivables, rt.receivables),
+    payables: mergeTombstones(lt.payables, rt.payables),
+    fixedPayments: mergeTombstones(lt.fixedPayments, rt.fixedPayments),
+    unbilledReceivables: mergeTombstones(lt.unbilledReceivables, rt.unbilledReceivables),
+  };
 
   merged.customerAutoSchedule = { ...remote.customerAutoSchedule, ...local.customerAutoSchedule };
   merged.vendorAutoSchedule = { ...remote.vendorAutoSchedule, ...local.vendorAutoSchedule };
