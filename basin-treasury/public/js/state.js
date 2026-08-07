@@ -576,8 +576,10 @@ export function mergeAgingImport(state, kind, parsed) {
       existing.dueDate = rec.dueDate;
       existing.age = rec.age;
       existing.txnType = rec.txnType;
+      existing.memo = rec.memo;
       if (kind === "AR") existing.poNumber = rec.poNumber;
       if (existing.balance > 0 && existing.status !== "open") existing.status = "open";
+      existing.updatedAt = new Date().toISOString();
       updated++;
     } else {
       const tmpl = state[schedKey][rec[groupKey]];
@@ -606,6 +608,7 @@ export function mergeAgingImport(state, kind, parsed) {
         if (x.originalBalance === undefined) x.originalBalance = x.balance;
         x.status = "paid";
         x.balance = 0;
+        x.updatedAt = new Date().toISOString();
         paidOff++;
       }
     }
@@ -665,12 +668,14 @@ export const KIND_MAP = {
 export function applyAutoScheduleToAll(state, kind) {
   const { listKey, groupKey, schedKey } = KIND_MAP[kind];
   let count = 0;
+  const now = new Date().toISOString();
   for (const x of state[listKey]) {
     if (x.status !== "open" || x.payWhenPaid) continue;
     const tmpl = state[schedKey][x[groupKey]];
-    if (tmpl?.uncertain) { x.uncertain = true; x.cfDate = null; continue; } // uncertain always wins over auto-schedule
+    if (tmpl?.uncertain) { x.uncertain = true; x.cfDate = null; x.updatedAt = now; continue; } // uncertain always wins over auto-schedule
     if (tmpl?.auto && x.date) {
       x.cfDate = clampToCurrentPeriod(state, toISO(addDays(x.date, tmpl.days || 0)));
+      x.updatedAt = now;
       count++;
     }
   }
@@ -682,10 +687,11 @@ export function applyAutoScheduleToGroup(state, kind, groupName) {
   const tmpl = state[schedKey][groupName];
   if (!tmpl) return 0;
   let count = 0;
+  const now = new Date().toISOString();
   for (const x of state[listKey]) {
     if (x.status !== "open" || x[groupKey] !== groupName || x.payWhenPaid) continue;
-    if (tmpl.uncertain) { x.uncertain = true; x.cfDate = null; continue; } // uncertain always wins over auto-schedule
-    if (x.date) { x.cfDate = clampToCurrentPeriod(state, toISO(addDays(x.date, tmpl.days || 0))); count++; }
+    if (tmpl.uncertain) { x.uncertain = true; x.cfDate = null; x.updatedAt = now; continue; } // uncertain always wins over auto-schedule
+    if (x.date) { x.cfDate = clampToCurrentPeriod(state, toISO(addDays(x.date, tmpl.days || 0))); x.updatedAt = now; count++; }
   }
   return count;
 }

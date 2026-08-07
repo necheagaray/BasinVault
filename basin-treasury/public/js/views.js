@@ -114,7 +114,7 @@ function receivablesBreakdown(state, period, wi /* number or null = whole period
 function breakdownPopupHTML(bd, label) {
   const rowsHtml = (list, cls) => list
     .slice().sort((a, b) => (a.customer || "").localeCompare(b.customer || ""))
-    .map((r) => `<div class="bd-row ${cls}"><span class="bd-name">${cls === "paid" ? "✓ " : ""}${escapeHtml(r.customer)}<span class="bd-inv">${escapeHtml(r.docNumber || "")}</span></span><span class="bd-amt">${fmtMoney(r.balance)}</span></div>`)
+    .map((r) => `<div class="bd-row ${cls}"><span class="bd-name">${cls === "paid" ? "✓ " : ""}${escapeHtml(r.customer)}<span class="bd-inv">${escapeHtml(r.docNumber || "")}${r.date ? ` · ${fmtDate(r.date)}` : ""}</span></span><span class="bd-amt">${fmtMoney(r.balance)}</span></div>`)
     .join("");
   return `
     <div class="bd-header">${escapeHtml(label)}</div>
@@ -1449,7 +1449,7 @@ function renderAPRows(store, period) {
   if (apFilter === "open") list = list.filter((p) => p.status === "open");
   if (apFilter === "scheduled") list = list.filter((p) => p.status === "open" && effectivePayableDate(state, period, p));
   if (apFilter === "unscheduled") list = list.filter((p) => p.status === "open" && !effectivePayableDate(state, period, p));
-  if (apSearch) list = list.filter((p) => `${p.vendor} ${p.docNumber}`.toLowerCase().includes(apSearch));
+  if (apSearch) list = list.filter((p) => `${p.vendor} ${p.docNumber} ${p.memo || ""}`.toLowerCase().includes(apSearch));
   if (apVendorFilter) list = list.filter((p) => p.vendor === apVendorFilter);
   if (apPayrunFilter === "unscheduled") list = list.filter((p) => !effectivePayableDate(state, period, p));
   else if (apPayrunFilter) list = list.filter((p) => effectivePayableDate(state, period, p) === apPayrunFilter);
@@ -1486,6 +1486,7 @@ function renderAPRows(store, period) {
       <td class="name">${escapeHtml(p.vendor)}</td>
       <td class="mono">${escapeHtml(p.docNumber || "")}</td>
       <td class="mono">${fmtDate(p.date)}</td>
+      <td class="memo-cell" title="${escapeHtml(p.memo || "")}">${escapeHtml(p.memo || "—")}</td>
       <td class="num">${fmtMoney(p.balance)}</td>
       <td>
         <label class="pwp-toggle"><input type="checkbox" class="pwp-check" ${p.payWhenPaid ? "checked" : ""} /> Pay when paid</label>
@@ -2127,6 +2128,7 @@ function renderAutoScheduleTable(store, kinds, host, search = "") {
       store.mutate((s) => {
         const t = s[schedKey][name];
         t.uncertain = !t.uncertain;
+        const now = new Date().toISOString();
         let n = 0;
         for (const kind of kinds) {
           const { listKey, groupKey } = KIND_MAP[kind];
@@ -2139,6 +2141,7 @@ function renderAutoScheduleTable(store, kinds, host, search = "") {
             } else {
               item.uncertain = false;
             }
+            item.updatedAt = now;
             n++;
           }
         }

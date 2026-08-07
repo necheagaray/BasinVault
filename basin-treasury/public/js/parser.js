@@ -104,6 +104,7 @@ function extractRecords(rows, kind /* 'AR' | 'AP' */) {
   const iDate = colMap["date"];
   const iDoc = colMap["document number"];
   const iPO = colMap["p.o. no."] ?? colMap["po #"] ?? colMap["p.o. #"];
+  const iMemo = colMap["memo"];
   const iDue = colMap["due date"];
   const iAge = colMap["age"];
   const iBal = colMap["open balance"];
@@ -135,6 +136,7 @@ function extractRecords(rows, kind /* 'AR' | 'AP' */) {
       date: cellDateISO(r[iDate]),
       docNumber: cellStr(r[iDoc]),
       ...(kind === "AR" ? { poNumber: cellStr(r[iPO]) } : {}),
+      memo: iMemo !== undefined ? cellStr(r[iMemo]) : "",
       dueDate: cellDateISO(r[iDue]),
       age: iAge !== undefined ? Math.round(cellNum(r[iAge])) : null,
       balance: cellNum(r[iBal]),
