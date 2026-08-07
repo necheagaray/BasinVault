@@ -1,6 +1,6 @@
 import { uid, toISO, parseISO, addDays, todayISO } from "./util.js";
 
-export const WEEKS_PER_PERIOD = 5;
+export const WEEKS_PER_PERIOD = 6;
 export const DEFAULT_OUTFLOW_CATEGORIES = ["Distributions", "Credit Card", "Sales Tax", "Other"];
 export const FIXED_CATEGORY_ORDER = [
   "Payroll",
@@ -111,7 +111,7 @@ function shiftOverrides(ov, n) {
 function shiftNotes(notes, n) {
   const out = {};
   for (const key of Object.keys(notes || {})) {
-    const m = key.match(/^(.*)::([0-4])$/);
+    const m = key.match(/^(.*)::([0-9])$/);
     if (!m) { out[key] = notes[key]; continue; } // row-level / total-column notes carry over untouched
     const wi = Number(m[2]);
     if (wi < n) continue; // note was on a now-completed week — drop it with that week
@@ -132,7 +132,7 @@ function shiftWeeksArray(weeks, n) {
 export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   const old = state.periods.find((p) => p.id === periodId);
   if (!old) return null;
-  const n = Math.max(1, Math.min(4, Math.round(weeksToRoll)));
+  const n = Math.max(1, Math.min(WEEKS_PER_PERIOD - 1, Math.round(weeksToRoll)));
 
   const calc = computeForecast(state, old);
   const newStart = toISO(addDays(old.startDate, 7 * n));

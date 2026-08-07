@@ -2,7 +2,7 @@ import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeMod
 import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor,
-  effectivePayableDate, rollForwardPeriod, KIND_MAP,
+  effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
 
@@ -75,7 +75,7 @@ function noteKey(rowType, cat, wi) {
 
 function labelCell(period, label, rowType, cat, editable) {
   const labelSpan = editable
-    ? `<span class="row-label-text clickable" data-row="${escapeHtml(rowType)}" data-cat="${escapeHtml(cat || "")}" title="Click to enter all 5 weeks at once">${escapeHtml(label)}</span>`
+    ? `<span class="row-label-text clickable" data-row="${escapeHtml(rowType)}" data-cat="${escapeHtml(cat || "")}" title="Click to enter all ${WEEKS_PER_PERIOD} weeks at once">${escapeHtml(label)}</span>`
     : `<span class="row-label-text">${escapeHtml(label)}</span>`;
   return `<td>${labelSpan}</td>`;
 }
@@ -251,7 +251,7 @@ export function renderForecast(store) {
   const weeksMeta = periodWeeks(period);
 
   document.getElementById("forecast-title").textContent = period.label;
-  document.getElementById("forecast-eyebrow").textContent = `5-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
+  document.getElementById("forecast-eyebrow").textContent = `${WEEKS_PER_PERIOD}-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
   document.getElementById("forecast-meta").textContent = `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
 
   const sel = document.getElementById("period-select");
@@ -373,7 +373,7 @@ export function renderForecast(store) {
     });
   });
 
-  // click a row label to enter all 5 weeks at once
+  // click a row label to enter all weeks at once
   table.querySelectorAll(".row-label-text.clickable").forEach((span) => {
     const rowType = span.dataset.row;
     const cat = span.dataset.cat || null;
@@ -472,7 +472,7 @@ function attachCellPencil(td, store, period, key) {
 
 function openBulkWeekModal(store, period, weeksMeta, weeksRows, rowType, cat, label) {
   openModal(`
-    <h3>${escapeHtml(label)} — enter all 5 weeks</h3>
+    <h3>${escapeHtml(label)} — enter all ${weeksMeta.length} weeks</h3>
     <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:14px;">Leave a box empty to fall back to the computed/scheduled amount for that week.</div>
     ${weeksMeta.map((w, wi) => `
       <div class="row">
@@ -482,7 +482,7 @@ function openBulkWeekModal(store, period, weeksMeta, weeksRows, rowType, cat, la
     `).join("")}
     <div class="modal-actions">
       <button class="btn-ghost" id="bw-cancel">Cancel</button>
-      <button class="btn-primary" id="bw-save" style="width:auto;">Save All 5 Weeks</button>
+      <button class="btn-primary" id="bw-save" style="width:auto;">Save All ${weeksMeta.length} Weeks</button>
     </div>
   `, {
     onMount: (host) => {
@@ -499,7 +499,7 @@ function openBulkWeekModal(store, period, weeksMeta, weeksRows, rowType, cat, la
           });
         });
         closeModal();
-        toast("Updated all 5 weeks", "success");
+        toast(`Updated all ${weeksMeta.length} weeks`, "success");
       };
     },
   });
@@ -1809,7 +1809,7 @@ export function renderFixed(store) {
 
   const weekPicker = (kind, selectedWeeks) => `
     <div class="week-picker" data-kind="${kind}">
-      ${[0, 1, 2, 3, 4].map((wi) => `<button type="button" class="week-toggle ${selectedWeeks.includes(wi) ? "on" : ""}" data-wi="${wi}">Wk ${wi + 1}</button>`).join("")}
+      ${Array.from({ length: WEEKS_PER_PERIOD }, (_, wi) => wi).map((wi) => `<button type="button" class="week-toggle ${selectedWeeks.includes(wi) ? "on" : ""}" data-wi="${wi}">Wk ${wi + 1}</button>`).join("")}
     </div>`;
 
   const payrollPanel = `
@@ -2179,10 +2179,7 @@ function openRollForwardModal(store, period, calc, weeksMeta) {
     <h3>⟳ Roll Forward</h3>
     <div class="row"><label>Weeks to roll forward</label>
       <select id="rf-weeks">
-        <option value="1">1 week</option>
-        <option value="2">2 weeks</option>
-        <option value="3">3 weeks</option>
-        <option value="4">4 weeks</option>
+        ${Array.from({ length: WEEKS_PER_PERIOD - 1 }, (_, i) => i + 1).map((n) => `<option value="${n}">${n} week${n === 1 ? "" : "s"}</option>`).join("")}
       </select>
     </div>
     <div class="desc" id="rf-preview" style="font-size:12.5px;color:var(--text-mid);margin-bottom:14px;line-height:1.6;">${buildPreview(1)}</div>
