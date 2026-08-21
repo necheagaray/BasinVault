@@ -968,7 +968,7 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 }
 @keyframes vault-pulse{ 0%,100%{ opacity:0.55; } 50%{ opacity:1; } }
 
-#view-home > .page-head, #view-home > #home-accounts, #view-home > .home-collected-grid, #view-home > #home-balances{ position:relative; z-index:1; }
+#view-home > .page-head, #view-home > #home-accounts, #view-home > #home-balances{ position:relative; z-index:1; }
 
 /* rivets on account cards, reinforcing the "vault plating" feel */
 .account-card{ position:relative; }
@@ -985,34 +985,71 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   50%{ box-shadow:0 0 46px -6px rgba(200,163,90,0.55); }
 }
 
-/* ---------------- Receivables Collected / Payables Paid buttons ---------------- */
+/* ---------------- Weekly account balances — 3 distinct grouped panels ---------------- */
 
-.home-collected-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px; }
-@media (max-width: 780px){ .home-collected-grid{ grid-template-columns:1fr; } }
-
-.home-collected-btn{
-  display:flex; align-items:center; gap:14px; text-align:left; width:100%;
-  cursor:pointer; font-family:inherit; color:inherit;
-  transition:transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+.balance-section-eyebrow{
+  font-family:var(--font-mono); font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.1em;
+  color:var(--brass); margin:28px 0 12px; padding-left:14px; position:relative;
 }
-.home-collected-btn:hover{ transform:translateY(-2px); border-color:var(--brass); box-shadow:0 14px 28px -18px rgba(0,0,0,0.8), 0 0 0 1px rgba(200,163,90,0.2); }
-.home-collected-icon{ font-size:26px; flex-shrink:0; }
-.home-collected-label{ font-family:'Oswald', var(--font-display); font-size:14px; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-hi); }
-.home-collected-label .arrow{ color:var(--brass); margin-left:4px; }
-.home-collected-sub{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-top:3px; }
-.home-collected-value{ font-family:var(--font-mono); font-size:19px; font-weight:700; margin-left:auto; }
-.home-collected-value.green{ color:var(--green); }
-.home-collected-value.red{ color:var(--red); }
+.balance-section-eyebrow::before{
+  content:""; position:absolute; left:0; top:2px; bottom:2px; width:3px; border-radius:2px;
+  background:linear-gradient(180deg, var(--brass-bright), transparent);
+}
 
-/* ---------------- Weekly account balances table ---------------- */
+.home-balance-layout{
+  display:grid;
+  grid-template-columns:1.15fr 1fr 210px;
+  grid-template-rows:auto auto;
+  grid-template-areas:
+    "basin basin eb"
+    "pc    pc    eb";
+  gap:16px;
+}
+@media (max-width: 900px){
+  .home-balance-layout{ grid-template-columns:1fr; grid-template-areas:"basin" "pc" "eb"; }
+}
 
-#home-balances{ margin-top:20px; }
+.balance-group-panel{
+  position:relative; overflow:hidden; padding-top:20px;
+  transition:transform .18s ease, box-shadow .18s ease;
+}
+.balance-group-panel::before{
+  content:""; position:absolute; top:0; left:0; right:0; height:3px;
+}
+.balance-group-basin::before{ background:linear-gradient(90deg, var(--brass), var(--brass-bright), var(--brass)); }
+.balance-group-pc::before{ background:linear-gradient(90deg, var(--cyan), #9fe6f5, var(--cyan)); }
+.balance-group-eb::before{ background:linear-gradient(90deg, var(--violet), #d8c9ff, var(--violet)); }
+
+.balance-group-header{
+  display:flex; align-items:center; gap:9px; margin-bottom:14px;
+  font-family:'Oswald', var(--font-display); font-size:15px; font-weight:700;
+  text-transform:uppercase; letter-spacing:0.04em; color:var(--text-hi);
+}
+.balance-group-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; box-shadow:0 0 8px currentColor; }
+.dot-brass{ background:var(--brass-bright); color:var(--brass-bright); }
+.dot-cyan{ background:var(--cyan); color:var(--cyan); }
+.dot-violet{ background:var(--violet); color:var(--violet); }
+
+.balance-group-basin{ background:linear-gradient(165deg, rgba(200,163,90,0.07) 0%, var(--bg-panel) 55%); border-color:rgba(200,163,90,0.35); }
+.balance-group-pc{ background:linear-gradient(165deg, rgba(122,217,236,0.06) 0%, var(--bg-panel) 55%); border-color:rgba(122,217,236,0.3); }
+.balance-group-eb{ background:linear-gradient(165deg, rgba(195,174,252,0.07) 0%, var(--bg-panel) 55%); border-color:rgba(195,174,252,0.3); }
+
 .home-balance-table{ font-size:12.5px; }
 .home-balance-table th{ white-space:nowrap; }
 .home-balance-table td.num{ font-family:var(--font-mono); text-align:right; white-space:nowrap; }
-.home-balance-table tr.home-balance-main td{ color:var(--brass-bright); font-weight:700; background:rgba(200,163,90,0.06); }
-.home-balance-table tr.home-balance-main td:first-child{ position:relative; }
+.home-balance-table tr.home-balance-main td{ color:var(--brass-bright); font-weight:700; background:rgba(200,163,90,0.08); }
 .home-balance-table tr.home-balance-total td{
-  font-weight:700; color:var(--text-hi); background:rgba(255,255,255,0.03);
+  font-weight:700; color:var(--text-hi); background:rgba(255,255,255,0.04);
   border-top:2px solid var(--line-bright); border-bottom:2px solid var(--line-bright);
 }
+
+/* EB Savings — narrow side panel, week-by-week vertical list instead of a cramped table */
+.balance-eb-weekly-list{ display:flex; flex-direction:column; gap:2px; }
+.balance-eb-week{
+  display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+  padding:9px 4px; border-bottom:1px solid var(--line);
+}
+.balance-eb-week:last-child{ border-bottom:none; font-weight:700; }
+.balance-eb-week:last-child .balance-eb-week-value{ color:var(--violet); font-size:15px; }
+.balance-eb-week-label{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); }
+.balance-eb-week-value{ font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--text-hi); }

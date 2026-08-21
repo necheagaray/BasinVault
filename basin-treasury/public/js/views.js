@@ -397,55 +397,9 @@ export function renderHome(store) {
   renderHomeSummaries(store, period);
 }
 
-function closedDuringPeriod(list, period, dateGetter) {
-  const items = list.filter((item) => item.status === "paid" && weekIndexForDateStrict(period, dateGetter(item)) !== null);
-  return { items, total: sum(items.map((r) => r.originalBalance ?? r.balance)) };
-}
-
-function openCollectedPaidModal(title, bd, isReceivable) {
-  const rows = bd.items
-    .slice()
-    .sort((a, b) => (b.originalBalance ?? b.balance) - (a.originalBalance ?? a.balance))
-    .map((r) => `<div class="vendor-rank"><span>${escapeHtml(isReceivable ? r.customer : r.vendor)} <span style="color:var(--text-dim);">· ${escapeHtml(r.docNumber || "")} · ${fmtDate(r.cfDate)}</span></span><span class="amt">${fmtMoney(r.originalBalance ?? r.balance)}</span></div>`)
-    .join("") || `<div class="meta">Nothing here yet this period.</div>`;
-  openModal(`
-    <button type="button" class="modal-close-x" id="cp-close">✕</button>
-    <h3>${isReceivable ? "📥" : "📤"} ${escapeHtml(title)}</h3>
-    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">${fmtMoney(bd.total)} total across ${bd.items.length} item${bd.items.length === 1 ? "" : "s"} during the current forecast period.</div>
-    <div class="breakdown-modal-body">${rows}</div>
-  `, {
-    closeOnBackdrop: false,
-    onMount: (host) => { host.querySelector("#cp-close").onclick = closeModal; },
-  });
-}
-
 function renderHomeSummaries(store, period) {
   const { state } = store;
   const weeksMeta = periodWeeks(period);
-
-  const arCollected = closedDuringPeriod(state.receivables, period, (r) => r.cfDate);
-  const apPaid = closedDuringPeriod(state.payables, period, (p) => effectivePayableDate(state, period, p));
-
-  document.getElementById("home-summaries").innerHTML = `
-    <button type="button" class="panel home-collected-btn" id="home-ar-collected">
-      <div class="home-collected-icon">📥</div>
-      <div>
-        <div class="home-collected-label">Receivables Collected <span class="arrow">▸</span></div>
-        <div class="home-collected-sub">${arCollected.items.length} item${arCollected.items.length === 1 ? "" : "s"} this period</div>
-      </div>
-      <div class="home-collected-value green">${fmtMoney(arCollected.total)}</div>
-    </button>
-    <button type="button" class="panel home-collected-btn" id="home-ap-paid">
-      <div class="home-collected-icon">📤</div>
-      <div>
-        <div class="home-collected-label">Payables Paid <span class="arrow">▸</span></div>
-        <div class="home-collected-sub">${apPaid.items.length} item${apPaid.items.length === 1 ? "" : "s"} this period</div>
-      </div>
-      <div class="home-collected-value red">${fmtMoney(apPaid.total)}</div>
-    </button>
-  `;
-  document.getElementById("home-ar-collected").onclick = () => openCollectedPaidModal("Receivables Collected This Period", arCollected, true);
-  document.getElementById("home-ap-paid").onclick = () => openCollectedPaidModal("Payables Paid This Period", apPaid, false);
 
   // weekly closing balance for every account, end of each week
   const calcFor = (id) => (id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id));
@@ -462,23 +416,44 @@ function renderHomeSummaries(store, period) {
     ${weeksMeta.map((w, wi) => `<td class="num">${fmtMoney(sum(ids.map((id) => byId[id][wi])))}</td>`).join("")}
   </tr>`;
 
-  const rows = [
-    acctRow("basin-checking", "Basin Checking", true),
-    acctRow("basin-savings", "Basin Savings", false),
-    totalRow("Basin Total", ["basin-checking", "basin-savings"]),
-    acctRow("eb-savings", "EB Savings", false),
-    acctRow("pc-checking", "P&C Checking", false),
-    acctRow("pc-savings", "P&C Savings", false),
-    totalRow("P&C Total", ["pc-checking", "pc-savings"]),
-  ].join("");
+  const groupTable = (rowsHtml) => `
+    <table class="data-table home-balance-table">
+      <thead><tr><th>Account</th>${weeksMeta.map((w) => `<th class="num">${fmtDateShort(w.end)}</th>`).join("")}</tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>`;
+
+  const groupHeader = (icon, title, dotClass) => `<div class="balance-group-header"><span class="balance-group-dot ${dotClass}"></span>${icon} ${escapeHtml(title)}</div>`;
+
+  const basinGroupHtml = `
+    <div class="panel balance-group-panel balance-group-basin" style="grid-area:basin;">
+      ${groupHeader("🏦", "Basin Group", "dot-brass")}
+      ${groupTable(acctRow("basin-checking", "Basin Checking", true) + acctRow("basin-savings", "Basin Savings", false) + totalRow("Basin Total", ["basin-checking", "basin-savings"]))}
+    </div>`;
+
+  const pcGroupHtml = `
+    <div class="panel balance-group-panel balance-group-pc" style="grid-area:pc;">
+      ${groupHeader("🏗️", "P&amp;C Group", "dot-cyan")}
+      ${groupTable(acctRow("pc-checking", "P&C Checking", false) + acctRow("pc-savings", "P&C Savings", false) + totalRow("P&C Total", ["pc-checking", "pc-savings"]))}
+    </div>`;
+
+  const ebWeeklyList = weeksMeta.map((w, wi) => `
+    <div class="balance-eb-week">
+      <span class="balance-eb-week-label">${fmtDateShort(w.end)}</span>
+      <span class="balance-eb-week-value">${fmtMoney(byId["eb-savings"][wi])}</span>
+    </div>`).join("");
+
+  const ebGroupHtml = `
+    <div class="panel balance-group-panel balance-group-eb" style="grid-area:eb;">
+      ${groupHeader("💰", "EB Savings", "dot-violet")}
+      <div class="balance-eb-weekly-list">${ebWeeklyList}</div>
+    </div>`;
 
   document.getElementById("home-balances").innerHTML = `
-    <div class="panel">
-      <h3 style="margin:0 0 14px; font-family:'Oswald', var(--font-display); font-size:15px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-hi);">Account Balances — End of Each Week</h3>
-      <table class="data-table home-balance-table">
-        <thead><tr><th>Account</th>${weeksMeta.map((w) => `<th class="num">${fmtDateShort(w.end)}</th>`).join("")}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+    <div class="balance-section-eyebrow">Account Balances — End of Each Week</div>
+    <div class="home-balance-layout">
+      ${basinGroupHtml}
+      ${pcGroupHtml}
+      ${ebGroupHtml}
     </div>
   `;
 }
