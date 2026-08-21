@@ -393,80 +393,75 @@ export function renderHome(store) {
   renderHomeSummaries(store, period);
 }
 
-function weeklyOpenSummary(list, period, dateGetter) {
-  const perWeek = Array(WEEKS_PER_PERIOD).fill(0);
-  for (const item of list) {
-    if (item.status !== "open") continue;
-    const wi = weekIndexForDate(period, dateGetter(item));
-    if (wi === null) continue;
-    perWeek[wi] += (item.originalBalance ?? item.balance);
-  }
-  return { perWeek, total: sum(perWeek) };
-}
-
 function closedDuringPeriod(list, period, dateGetter) {
   const items = list.filter((item) => item.status === "paid" && weekIndexForDateStrict(period, dateGetter(item)) !== null);
   return { items, total: sum(items.map((r) => r.originalBalance ?? r.balance)) };
 }
 
-function homeSummaryHoverHTML(bd, label) {
+function openCollectedPaidModal(title, bd, isReceivable) {
   const rows = bd.items
     .slice()
     .sort((a, b) => (b.originalBalance ?? b.balance) - (a.originalBalance ?? a.balance))
-    .map((r) => `<div class="bd-row paid"><span class="bd-name">✓ ${escapeHtml(r.customer || r.vendor)}<span class="bd-inv">${escapeHtml(r.docNumber || "")}${r.cfDate ? ` · ${fmtDate(r.cfDate)}` : ""}</span></span><span class="bd-amt">${fmtMoney(r.originalBalance ?? r.balance)}</span></div>`)
-    .join("");
-  return `
-    <div class="bd-header">${escapeHtml(label)}</div>
-    <div class="bd-summary">${fmtMoney(bd.total)} total · ${bd.items.length} item${bd.items.length === 1 ? "" : "s"}</div>
-    ${rows || `<div class="bd-empty">Nothing here yet this period</div>`}
-  `;
+    .map((r) => `<div class="vendor-rank"><span>${escapeHtml(isReceivable ? r.customer : r.vendor)} <span style="color:var(--text-dim);">· ${escapeHtml(r.docNumber || "")} · ${fmtDate(r.cfDate)}</span></span><span class="amt">${fmtMoney(r.originalBalance ?? r.balance)}</span></div>`)
+    .join("") || `<div class="meta">Nothing here yet this period.</div>`;
+  openModal(`
+    <button type="button" class="modal-close-x" id="cp-close">✕</button>
+    <h3>${isReceivable ? "📥" : "📤"} ${escapeHtml(title)}</h3>
+    <div class="desc" style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">${fmtMoney(bd.total)} total across ${bd.items.length} item${bd.items.length === 1 ? "" : "s"} during the current forecast period.</div>
+    <div class="breakdown-modal-body">${rows}</div>
+  `, {
+    closeOnBackdrop: false,
+    onMount: (host) => { host.querySelector("#cp-close").onclick = closeModal; },
+  });
 }
 
 function renderHomeSummaries(store, period) {
   const { state } = store;
   const weeksMeta = periodWeeks(period);
 
-  const arWeekly = weeklyOpenSummary(state.receivables, period, (r) => r.cfDate);
   const arCollected = closedDuringPeriod(state.receivables, period, (r) => r.cfDate);
-  const apWeekly = weeklyOpenSummary(state.payables, period, (p) => effectivePayableDate(state, period, p));
   const apPaid = closedDuringPeriod(state.payables, period, (p) => effectivePayableDate(state, period, p));
 
-  const weeklyRow = (perWeek) => weeksMeta.map((w, wi) => `
-    <div class="summary-week-col">
-      <div class="summary-week-label">${fmtDateShort(w.start)}–${fmtDateShort(w.end)}</div>
-      <div class="summary-week-amt">${fmtMoney(perWeek[wi])}</div>
-    </div>
-  `).join("");
-
-  const panel = (opts) => `
-    <div class="panel vault-summary-panel">
-      <div class="summary-head">
-        <h3>${opts.icon} ${opts.title}</h3>
-        <span class="summary-asof">${opts.asOfDate ? `Aged ${opts.kind} as of ${fmtDate(opts.asOfDate)}` : `No ${opts.kind} import yet`}</span>
-      </div>
-      <div class="summary-weekly-row">${weeklyRow(opts.perWeek)}</div>
-      <div class="summary-collected-stat" id="${opts.hoverId}">
-        <div class="label">${opts.collectedLabel} — Hover for Detail</div>
-        <div class="value ${opts.colorClass}">${fmtMoney(opts.collectedTotal)}</div>
-      </div>
-    </div>
-  `;
-
   document.getElementById("home-summaries").innerHTML = `
-    ${panel({
-      icon: "📥", title: "Receivables Summary", kind: "AR", asOfDate: state.arAsOfDate,
-      perWeek: arWeekly.perWeek, collectedLabel: "Receivables Collected This Period", collectedTotal: arCollected.total,
-      colorClass: "green", hoverId: "home-ar-collected",
-    })}
-    ${panel({
-      icon: "📤", title: "Payables Summary", kind: "AP", asOfDate: state.apAsOfDate,
-      perWeek: apWeekly.perWeek, collectedLabel: "Payables Paid This Period", collectedTotal: apPaid.total,
-      colorClass: "red", hoverId: "home-ap-paid",
-    })}
+    <button type="button" class="panel home-collected-btn" id="home-ar-collected">
+      <div class="home-collected-icon">📥</div>
+      <div>
+        <div class="home-collected-label">Receivables Collected <span class="arrow">▸</span></div>
+        <div class="home-collected-sub">${arCollected.items.length} item${arCollected.items.length === 1 ? "" : "s"} this period</div>
+      </div>
+      <div class="home-collected-value green">${fmtMoney(arCollected.total)}</div>
+    </button>
+    <button type="button" class="panel home-collected-btn" id="home-ap-paid">
+      <div class="home-collected-icon">📤</div>
+      <div>
+        <div class="home-collected-label">Payables Paid <span class="arrow">▸</span></div>
+        <div class="home-collected-sub">${apPaid.items.length} item${apPaid.items.length === 1 ? "" : "s"} this period</div>
+      </div>
+      <div class="home-collected-value red">${fmtMoney(apPaid.total)}</div>
+    </button>
   `;
+  document.getElementById("home-ar-collected").onclick = () => openCollectedPaidModal("Receivables Collected This Period", arCollected, true);
+  document.getElementById("home-ap-paid").onclick = () => openCollectedPaidModal("Payables Paid This Period", apPaid, false);
 
-  attachBreakdownHover(document.getElementById("home-ar-collected"), () => arCollected, () => "Receivables Collected This Period", homeSummaryHoverHTML);
-  attachBreakdownHover(document.getElementById("home-ap-paid"), () => apPaid, () => "Payables Paid This Period", homeSummaryHoverHTML);
+  // weekly closing balance for every account, end of each week
+  const calcFor = (id) => (id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id));
+  const rows = ACCOUNTS.map((a) => {
+    const calc = calcFor(a.id);
+    return `<tr class="${a.isMain ? "home-balance-main" : ""}">
+      <td>${a.isMain ? "★ " : ""}${escapeHtml(a.name)}</td>
+      ${calc.weeks.map((w) => `<td class="num">${fmtMoney(w.closing)}</td>`).join("")}
+    </tr>`;
+  }).join("");
+
+  document.getElementById("home-balances").innerHTML = `
+    <div class="panel">
+      <h3 style="margin:0 0 14px; font-family:'Oswald', var(--font-display); font-size:15px; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-hi);">Account Balances — End of Each Week</h3>
+      <table class="data-table home-balance-table">
+        <thead><tr><th>Account</th>${weeksMeta.map((w) => `<th class="num">${fmtDateShort(w.end)}</th>`).join("")}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 export function renderForecast(store) {
