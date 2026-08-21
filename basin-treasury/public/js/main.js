@@ -1,13 +1,14 @@
 import * as api from "./api.js";
-import { defaultState, mergeStates } from "./state.js";
+import { defaultState, mergeStates, migratePeriod } from "./state.js";
 import { debounce, toast, contourSVG, masterPlanSVG } from "./util.js";
-import { renderForecast, renderReceivables, renderUnbilled, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
+import { renderHome, renderForecast, renderReceivables, renderUnbilled, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
 
 document.getElementById("login-contours").innerHTML = contourSVG(3, { w: 900, h: 700 });
 document.getElementById("topbar-contours").innerHTML = contourSVG(7, { w: 1600, h: 100 });
 document.getElementById("settings-blueprint").innerHTML = masterPlanSVG();
 
 const RENDERERS = {
+  home: renderHome,
   forecast: renderForecast,
   receivables: renderReceivables,
   unbilled: renderUnbilled,
@@ -20,7 +21,7 @@ const Store = {
   state: null,
   user: null,
   canEdit: false,
-  activeView: "forecast",
+  activeView: "home",
   lastLocalEdit: 0,
   editSeq: 0,
   savedSeq: 0,
@@ -139,6 +140,7 @@ const Store = {
       this.state = snap.state;
       if (!this.state.unbilledReceivables) this.state.unbilledReceivables = [];
       if (!this.state.tombstones) this.state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} };
+      this.state.periods.forEach((p) => migratePeriod(p));
       await this.pushNow();
       this.render();
       toast(`Restored version ${snap.version}`, "success");
@@ -181,6 +183,7 @@ async function boot() {
     if (!remote.manualOutflowCategories.includes("Other")) remote.manualOutflowCategories.push("Other");
     if (!remote.unbilledReceivables) remote.unbilledReceivables = [];
     if (!remote.tombstones) remote.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} };
+    remote.periods.forEach((p) => migratePeriod(p));
     Store.state = remote;
     showApp();
     Store.render();

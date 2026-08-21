@@ -3,6 +3,7 @@ import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone,
+  ACCOUNTS, TRANSFER_LINKS, accountName, computeForecastForAccount, computeSimpleAccountForecast,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
 
@@ -45,16 +46,18 @@ function rowValue(weeksRows, rowType, cat, wi) {
     fixed: r.fixedRows[cat],
     apPayables: r.apPayables,
     locDraw: r.locDraw,
+    transferToBasinSavings: r.transferToBasinSavings,
   }[rowType];
 }
 
-function overrideEntry(overrides, rowType, cat, wi) {
+function overrideEntry(overrides, rowType, cat, wi, period) {
   if (rowType === "receivablesCollected") return overrides.receivablesCollected[wi];
   if (rowType === "otherInflows") return overrides.otherInflows[wi];
   if (rowType === "manual") return overrides.manualOutflow?.[cat]?.[wi];
   if (rowType === "fixed") return overrides.fixedGroup?.[cat]?.[wi];
   if (rowType === "apPayables") return overrides.apPayables[wi];
   if (rowType === "locDraw") return overrides.locDraw[wi];
+  if (rowType === "transferToBasinSavings") return period?.transfers?.toBasinSavings?.[wi];
   return undefined;
 }
 
@@ -66,6 +69,7 @@ function writeOverride(period, rowType, cat, wi, stamped) {
   if (rowType === "fixed") { o.fixedGroup[cat] = o.fixedGroup[cat] || {}; setOrDel(o.fixedGroup[cat], wi, stamped); }
   if (rowType === "apPayables") setOrDel(o.apPayables, wi, stamped);
   if (rowType === "locDraw") setOrDel(o.locDraw, wi, stamped);
+  if (rowType === "transferToBasinSavings") { period.transfers.toBasinSavings = period.transfers.toBasinSavings || {}; setOrDel(period.transfers.toBasinSavings, wi, stamped); }
 }
 
 function noteKey(rowType, cat, wi) {
@@ -82,6 +86,7 @@ function labelCell(period, label, rowType, cat, editable) {
 
 function receivablesBreakdown(state, period, wi /* number or null = whole period */) {
   const matchesFor = (r) => {
+    if ((r.depositAccount || "basin-checking") !== "basin-checking") return false;
     const idx = r.status === "paid" ? weekIndexForDateStrict(period, r.cfDate) : weekIndexForDate(period, r.cfDate);
     if (idx === null) return false;
     return wi === null ? true : idx === wi;
@@ -243,22 +248,174 @@ function attachBreakdownClick(td, getBreakdown, getLabel, buildHTML = breakdownP
   });
 }
 
+function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
+
+const SIMPLE_OPENING_KEY = { "pc-checking": "pcOpeningCash", "eb-savings": "ebOpeningCash", "basin-savings": "basinSavingsOpeningCash", "pc-savings": "pcSavingsOpeningCash" };
+
+function writeSimpleTransferField(period, accountId, key, wi, stamped) {
+  if (key === "pcOtherOutflow") { period.pcOtherOutflow = period.pcOtherOutflow || {}; setOrDel(period.pcOtherOutflow, wi, stamped); }
+  else if (key === "toPcSavings") { period.transfers.toPcSavings = period.transfers.toPcSavings || {}; setOrDel(period.transfers.toPcSavings, wi, stamped); }
+  else if (key === "toBasinChecking" && accountId === "basin-savings") { period.transfers.fromBasinSavings = period.transfers.fromBasinSavings || {}; setOrDel(period.transfers.fromBasinSavings, wi, stamped); }
+  else if (key === "toBasinChecking" && accountId === "pc-savings") { period.transfers.fromPcSavingsToBasin = period.transfers.fromPcSavingsToBasin || {}; setOrDel(period.transfers.fromPcSavingsToBasin, wi, stamped); }
+}
+
+function renderSimpleAccountForecast(store, period, accountId) {
+  const { state } = store;
+  const calc = computeSimpleAccountForecast(state, period, accountId);
+  const weeks = calc.weeks;
+  const weeksMeta = periodWeeks(period);
+  const name = accountName(accountId);
+  const openingKey = SIMPLE_OPENING_KEY[accountId];
+
+  document.getElementById("forecast-title").textContent = `${name} — ${period.label}`;
+  document.getElementById("forecast-eyebrow").textContent = `${WEEKS_PER_PERIOD}-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
+  document.getElementById("forecast-meta").textContent = accountId === "eb-savings"
+    ? "No activity except the monthly transfer in from Basin Checking."
+    : `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
+
+  const netTotal = calc.totals.netCashflow;
+  document.getElementById("forecast-stats").innerHTML = `
+    <div class="stat-card sc-open"><div class="label">Opening Cash</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
+    <div class="stat-card sc-in"><div class="label">Total Inflows</div><div class="value green">${fmtMoney(calc.totals.inflowTotal)}</div></div>
+    <div class="stat-card sc-out"><div class="label">Total Outflows</div><div class="value red">${fmtMoney(calc.totals.outflowTotal)}</div></div>
+    <div class="stat-card sc-net"><div class="label">Net Cash Flow</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</div></div>
+    <div class="stat-card sc-close"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+  `;
+
+  // union of row keys that appear in ANY week, so every week shows the same rows even if a value is 0
+  const inflowKeys = [], outflowKeys = [];
+  weeks.forEach((w) => {
+    w.inflows.forEach((r) => { if (!inflowKeys.find((k) => k.key === r.key)) inflowKeys.push(r); });
+    w.outflows.forEach((r) => { if (!outflowKeys.find((k) => k.key === r.key)) outflowKeys.push(r); });
+  });
+
+  const rowHtml = (rowMeta, bucket, extraClass) => {
+    const label = rowMeta.label;
+    const cells = weeks.map((w, wi) => {
+      const item = w[bucket].find((r) => r.key === rowMeta.key);
+      const val = item ? item.amount : 0;
+      return rowMeta.editable ? `<td class="ed" data-wi="${wi}" data-key="${rowMeta.key}">${fmtMoney(val)}</td>` : `<td>${fmtMoney(val)}</td>`;
+    }).join("");
+    const total = sum(weeks.map((w) => (w[bucket].find((r) => r.key === rowMeta.key)?.amount) || 0));
+    return `<tr class="${extraClass}" data-simple-row="${rowMeta.key}"><td><span class="row-label-text">${escapeHtml(label)}</span></td>${cells}<td>${fmtMoney(total)}</td></tr>`;
+  };
+
+  const table = document.getElementById("cf-grid");
+  table.innerHTML = `
+    <thead><tr><th>Line Item</th>${weekHeaderCells(weeksMeta)}<th>Total</th></tr></thead>
+    <tbody>
+      <tr class="section-label"><td colspan="${weeks.length + 2}">Opening Balance</td></tr>
+      <tr class="opening"><td><span class="row-label-text">Opening Cash</span></td>${weeks.map((r, wi) => wi === 0 ? `<td class="ed opening-open" data-wi="0">${fmtMoney(r.opening)}</td>` : `<td>${fmtMoney(r.opening)}</td>`).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
+
+      <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}">Cash Inflow</td></tr>
+      ${inflowKeys.map((rk) => rowHtml(rk, "inflows", "inflow-row")).join("")}
+
+      <tr class="section-label sec-outflow-fixed"><td colspan="${weeks.length + 2}">Cash Outflow</td></tr>
+      ${outflowKeys.map((rk) => rowHtml(rk, "outflows", "fixed-row")).join("")}
+
+      <tr class="net"><td><span class="row-label-text">Net Cashflow</span></td>${weeks.map((r) => `<td class="${r.netCashflow >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(r.netCashflow)}</td>`).join("")}<td class="${netTotal >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(netTotal)}</td></tr>
+
+      <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
+      <tr class="closing"><td><span class="row-label-text">Closing Cash</span></td>${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
+    </tbody>
+  `;
+
+  // wire the Opening Cash cell (week 1 only)
+  table.querySelector("td.opening-open")?.addEventListener("click", function handler() {
+    editableCell(this, period[openingKey] || 0, (val) => {
+      store.mutate((s) => {
+        const per = s.periods.find((p) => p.id === period.id);
+        per[openingKey] = val ?? 0;
+      });
+    }, { title: `Click to set ${name}'s opening cash for this period` });
+    this.removeEventListener("click", handler);
+  }, { once: true });
+
+  // wire every editable inflow/outflow cell
+  table.querySelectorAll("td.ed[data-key]").forEach((td) => {
+    const key = td.dataset.key;
+    const wi = Number(td.dataset.wi);
+    const bucket = inflowKeys.find((k) => k.key === key) ? "inflows" : "outflows";
+    const item = weeks[wi][bucket].find((r) => r.key === key);
+    editableCell(td, item ? item.amount : 0, (val) => {
+      store.mutate((s) => {
+        const per = s.periods.find((p) => p.id === period.id);
+        const stamped = val === null ? null : { v: val, by: store.initials(), at: new Date().toISOString() };
+        writeSimpleTransferField(per, accountId, key, wi, stamped);
+      });
+    });
+  });
+
+  requestAnimationFrame(syncStickyOffsets);
+}
+
+export function renderHome(store) {
+  const { state } = store;
+  const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
+  document.getElementById("home-meta").textContent = `${period.label} · ${WEEKS_PER_PERIOD}-week forecast · Starts ${fmtDate(period.startDate)}`;
+
+  const calcFor = (id) => (id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id));
+
+  const cardHtml = (acct) => {
+    const calc = calcFor(acct.id);
+    const netTotal = calc.totals.netCashflow;
+    return `
+      <div class="panel account-card ${acct.isMain ? "main-account" : ""}" data-account="${acct.id}" role="button" tabindex="0">
+        ${acct.isMain ? `<div class="main-account-badge">★ MAIN ACCOUNT — MONITOR THIS ONE</div>` : ""}
+        <div class="account-card-name">${escapeHtml(acct.name)}</div>
+        <div class="account-card-figures">
+          <div><div class="label">Opening</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
+          <div><div class="label">Net Change</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal, { signed: true })}</div></div>
+          <div><div class="label">Closing (End of Forecast)</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+        </div>
+        <div class="account-card-cta">View ${escapeHtml(acct.name)} Forecast ▸</div>
+      </div>`;
+  };
+
+  const main = ACCOUNTS.find((a) => a.isMain);
+  const rest = ACCOUNTS.filter((a) => !a.isMain);
+
+  document.getElementById("home-accounts").innerHTML = `
+    ${cardHtml(main)}
+    <div class="account-card-grid">${rest.map(cardHtml).join("")}</div>
+  `;
+
+  document.querySelectorAll(".account-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      selectedAccountId = card.dataset.account;
+      store.activeView = "forecast";
+      store.render();
+    });
+    card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") card.click(); });
+  });
+}
+
 export function renderForecast(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
-  const calc = computeForecast(state, period);
-  const weeks = calc.weeks;
   const weeksMeta = periodWeeks(period);
 
-  document.getElementById("forecast-title").textContent = period.label;
-  document.getElementById("forecast-eyebrow").textContent = `${WEEKS_PER_PERIOD}-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
-  document.getElementById("forecast-meta").textContent = `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
+  const acctSel = document.getElementById("account-select");
+  acctSel.innerHTML = ACCOUNTS.map((a) => `<option value="${a.id}" ${a.id === selectedAccountId ? "selected" : ""}>${a.isMain ? "★ " : ""}${escapeHtml(a.name)}${a.isMain ? " (Main)" : ""}</option>`).join("");
+  acctSel.onchange = () => { selectedAccountId = acctSel.value; store.render(); };
 
   const sel = document.getElementById("period-select");
   sel.innerHTML = state.periods.map((p) => `<option value="${p.id}" ${p.id === period.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
   sel.onchange = () => { state.activePeriodId = sel.value; store.render(); };
 
-  document.getElementById("btn-roll-forward").onclick = () => openRollForwardModal(store, period, calc, weeksMeta);
+  document.getElementById("btn-roll-forward").onclick = () => openRollForwardModal(store, period, computeForecast(state, period), weeksMeta);
+
+  if (selectedAccountId !== "basin-checking") {
+    renderSimpleAccountForecast(store, period, selectedAccountId);
+    return;
+  }
+
+  const calc = computeForecast(state, period);
+  const weeks = calc.weeks;
+
+  document.getElementById("forecast-title").textContent = period.label;
+  document.getElementById("forecast-eyebrow").textContent = `${WEEKS_PER_PERIOD}-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
+  document.getElementById("forecast-meta").textContent = `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
 
   const statRow = document.getElementById("forecast-stats");
   const netTotal = calc.totals.netCashflow;
@@ -305,6 +462,11 @@ export function renderForecast(store) {
 
       <tr class="loc-row" data-row="locDraw">${labelCell(period, "⟲ LOC Draw / (Repayment)", "locDraw", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.locDraw)}</td>`).join("")}<td>${fmtMoney(calc.totals.locDraw)}</td></tr>
 
+      <tr class="section-label"><td colspan="${weeks.length + 2}">Inter-Account Transfers</td></tr>
+      <tr class="loc-row" data-row="transferToBasinSavings">${labelCell(period, "⇄ Transfer to Basin Savings", "transferToBasinSavings", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.transferToBasinSavings)}</td>`).join("")}<td>${fmtMoney(calc.totals.transferToBasinSavings)}</td></tr>
+      <tr class="loc-row"><td><span class="row-label-text">⇄ Transfer from Basin Savings <span style="font-size:9px;color:var(--text-dim);text-transform:none;">(set on Basin Savings)</span></span></td>${weeks.map((r) => `<td>${fmtMoney(r.transferFromBasinSavings)}</td>`).join("")}<td>${fmtMoney(calc.totals.transferFromBasinSavings)}</td></tr>
+      <tr class="loc-row"><td><span class="row-label-text">⇄ Return from P&amp;C Savings <span style="font-size:9px;color:var(--text-dim);text-transform:none;">(set on P&amp;C Savings)</span></span></td>${weeks.map((r) => `<td>${fmtMoney(r.transferFromPcSavings)}</td>`).join("")}<td>${fmtMoney(calc.totals.transferFromPcSavings)}</td></tr>
+
       <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
       <tr class="closing" data-row="closing">${labelCell(period, "Closing Cash", "closing", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
 
@@ -344,7 +506,7 @@ export function renderForecast(store) {
     const wi = Number(td.dataset.wi);
     const cat = tr.dataset.cat;
 
-    const entry = overrideEntry(period.overrides, rowType, cat, wi);
+    const entry = overrideEntry(period.overrides, rowType, cat, wi, period);
     const hasOverride = entry !== undefined;
     const who = hasOverride && typeof entry === "object" ? entry.by : null;
     const currentVal = rowValue(weeks, rowType, cat, wi);
@@ -616,6 +778,8 @@ function openItemNoteModal(store, listKey, id) {
 }
 
 /* ============================================================ RECEIVABLES ============================================================ */
+
+let selectedAccountId = "basin-checking";
 
 let arFilter = "open", arSearch = "", arWeekFilter = null, arCustomerFilter = "";
 const arSelected = new Set();
@@ -897,7 +1061,7 @@ function renderARRows(store, period) {
   document.getElementById("ar-count").innerHTML = `${list.length} rows${arSelected.size ? ` · ${arSelected.size} selected` : ""}${weekLabel}`;
   document.getElementById("ar-week-clear")?.addEventListener("click", () => { arWeekFilter = null; renderReceivables(store); });
   const tbody = document.getElementById("ar-tbody");
-  if (!list.length) { tbody.innerHTML = `<tr><td colspan="12"><div class="empty-state"><h4>No invoices here</h4>Import your Aged AR export or add one manually.</div></td></tr>`; return; }
+  if (!list.length) { tbody.innerHTML = `<tr><td colspan="13"><div class="empty-state"><h4>No invoices here</h4>Import your Aged AR export or add one manually.</div></td></tr>`; return; }
 
   tbody.innerHTML = list.map((r) => {
     const days = r.date ? Math.round((parseISO(r.cfDate || r.date) - parseISO(r.date)) / 86400000) : "";
@@ -915,6 +1079,12 @@ function renderARRows(store, period) {
       <td class="mono">${escapeHtml(r.poNumber || "—")}</td>
       <td><input class="mini-input days-input ${r.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the pay date is uncertain" ${r.status !== "open" ? "disabled" : ""}/></td>
       <td class="mono cf-date">${r.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (r.cfDate ? fmtDate(r.cfDate) : "—")}${whoBadge}</td>
+      <td>
+        <select class="mini-select deposit-account-select">
+          <option value="basin-checking" ${(r.depositAccount || "basin-checking") === "basin-checking" ? "selected" : ""}>Basin Checking</option>
+          <option value="pc-checking" ${r.depositAccount === "pc-checking" ? "selected" : ""}>P&amp;C Checking</option>
+        </select>
+      </td>
       <td class="mono">${r.date ? `${daysBetween(r.date, todayISO())}d` : "—"}</td>
       <td class="num balance-cell" title="Click to correct this invoice's balance directly">${fmtMoney(r.balance)}${hasPartial ? `<div class="partial-note">${fmtMoney(paidSoFar)} paid of ${fmtMoney(r.originalBalance ?? r.balance)}</div>` : ""}${hasPayments ? `<button type="button" class="payment-history-link" title="View / manage payment history">${(r.payments || []).length} payment${(r.payments || []).length === 1 ? "" : "s"} ▸</button>` : ""}</td>
       <td><span class="badge ${r.status}">${r.status}</span></td>
@@ -946,6 +1116,13 @@ function renderARRows(store, period) {
     attachItemNotePencil(tr.querySelector(".name"), store, "receivables", id);
 
     tr.querySelector(".record-payment")?.addEventListener("click", () => openRecordPaymentModal(store, id));
+    tr.querySelector(".deposit-account-select")?.addEventListener("change", (e) => {
+      store.mutate((s) => {
+        const item = s.receivables.find((x) => x.id === id);
+        item.depositAccount = e.target.value;
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+      });
+    });
     tr.querySelector(".days-input")?.addEventListener("change", (e) => {
       const raw = e.target.value.trim();
       store.mutate((s) => {
@@ -1844,9 +2021,45 @@ export function renderFixed(store) {
     </div>
   `;
 
+  const pcPayrollWeeks = (period.pcPayroll?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
+  const pcK401Weeks2 = (period.pcK401?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
+  const pcPayrollAmt = period.pcPayroll?.amount || 0;
+  const pcK401Amt = period.pcK401?.amount || 0;
+
+  const pcPayrollPanel = `
+    <div class="panel fixed-group" style="border-top:2px solid var(--indigo);">
+      <div class="fixed-group-head">
+        <h3>P&amp;C Payroll <span class="count">${pcPayrollWeeks.length} run${pcPayrollWeeks.length === 1 ? "" : "s"} this period</span></h3>
+        <span class="total">${fmtMoney(pcPayrollWeeks.length * pcPayrollAmt)} this period</span>
+      </div>
+      <div class="fixed-item" style="grid-template-columns:1fr 120px;">
+        <div>
+          <div class="fname">P&amp;C Payroll</div>
+          <div class="fsched">Outflow from P&amp;C Checking · click a week to toggle it</div>
+        </div>
+        <div class="famt fixed-amt-edit" data-kind="pcPayroll" title="Click to edit the amount">${fmtMoney(pcPayrollAmt)}<div class="fsched">per run</div></div>
+      </div>
+      ${weekPicker("pcPayroll", pcPayrollWeeks)}
+    </div>
+    <div class="panel fixed-group" style="border-top:2px solid var(--indigo);">
+      <div class="fixed-group-head">
+        <h3>P&amp;C 401K <span class="count">${pcK401Weeks2.length} run${pcK401Weeks2.length === 1 ? "" : "s"} this period</span></h3>
+        <span class="total">${fmtMoney(pcK401Weeks2.length * pcK401Amt)} this period</span>
+      </div>
+      <div class="fixed-item" style="grid-template-columns:1fr 120px;">
+        <div>
+          <div class="fname">P&amp;C 401K</div>
+          <div class="fsched">Outflow from P&amp;C Checking · click a week to toggle it</div>
+        </div>
+        <div class="famt fixed-amt-edit" data-kind="pcK401" title="Click to edit the amount">${fmtMoney(pcK401Amt)}<div class="fsched">per run</div></div>
+      </div>
+      ${weekPicker("pcK401", pcK401Weeks2)}
+    </div>
+  `;
+
   let periodTotal = payrollWeeks.length * payrollAmt + k401Weeks.length * k401Amt;
   const host = document.getElementById("fixed-groups");
-  host.innerHTML = payrollPanel + categories.filter((c) => c !== "Payroll" && c !== "401K").map((cat) => {
+  host.innerHTML = payrollPanel + pcPayrollPanel + categories.filter((c) => c !== "Payroll" && c !== "401K").map((cat) => {
     const items = state.fixedPayments.filter((f) => f.category === cat);
     let groupTotal = 0;
     const rows = items.map((item) => {
@@ -1857,7 +2070,7 @@ export function renderFixed(store) {
       return `<div class="fixed-item" data-id="${item.id}">
         <input type="checkbox" class="active-toggle" ${item.active !== false ? "checked" : ""} />
         <div>
-          <div class="fname">${escapeHtml(item.name)}${whoBadge}</div>
+          <div class="fname">${escapeHtml(item.name)}${item.transfersToAccount ? ` <span class="window-badge" title="Also posts as an inflow on ${escapeHtml(accountName(item.transfersToAccount))}">→ ${escapeHtml(accountName(item.transfersToAccount))}</span>` : ""}${whoBadge}</div>
           <div class="fsched">${scheduleLabel(item)} ${occ.length ? `· ${occ.length}x this period: ${occ.map(fmtDateShort).join(" · ")}` : "· none this period"}${item.endDate ? ` · ends ${fmtDate(item.endDate)}` : ""}</div>
         </div>
         <div class="famt">${fmtMoney(total)}<div class="fsched">${fmtMoney(item.amount)} each</div></div>
@@ -1879,13 +2092,15 @@ export function renderFixed(store) {
       <button class="btn-ghost" id="add-fixed-new-cat">+ Add Item In New Category</button></div></div>`;
 
 
+  const bucketFor = (per, kind) => ({ payroll: per.payroll, k401: per.k401, pcPayroll: per.pcPayroll, pcK401: per.pcK401 }[kind]);
+
   host.querySelectorAll(".week-toggle").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const kind = btn.closest(".week-picker").dataset.kind; // "payroll" | "k401"
+      const kind = btn.closest(".week-picker").dataset.kind; // "payroll" | "k401" | "pcPayroll" | "pcK401"
       const wi = Number(btn.dataset.wi);
       store.mutate((s) => {
         const per = s.periods.find((p) => p.id === period.id);
-        const bucket = kind === "payroll" ? per.payroll : per.k401;
+        const bucket = bucketFor(per, kind);
         bucket.weeks = bucket.weeks || [];
         const idx = bucket.weeks.indexOf(wi);
         if (idx === -1) bucket.weeks.push(wi); else bucket.weeks.splice(idx, 1);
@@ -1895,7 +2110,7 @@ export function renderFixed(store) {
   host.querySelectorAll(".fixed-amt-edit").forEach((cell) => {
     cell.addEventListener("click", () => {
       const kind = cell.dataset.kind;
-      const current = kind === "payroll" ? (period.payroll?.amount || 0) : (period.k401?.amount || 0);
+      const current = bucketFor(period, kind)?.amount || 0;
       const input = document.createElement("input");
       input.type = "number"; input.step = "0.01"; input.className = "mini-input"; input.style.width = "100px"; input.style.textAlign = "right";
       input.value = current;
@@ -1904,7 +2119,7 @@ export function renderFixed(store) {
         const val = parseFloat(input.value);
         store.mutate((s) => {
           const per = s.periods.find((p) => p.id === period.id);
-          const bucket = kind === "payroll" ? per.payroll : per.k401;
+          const bucket = bucketFor(per, kind);
           if (!Number.isNaN(val) && val >= 0) bucket.amount = Math.round(val * 100) / 100;
         });
       };
@@ -1953,6 +2168,13 @@ function openFixedModal(store, existing) {
       <select id="f-dow">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<option value="${i}" ${(existing.weekday ?? 4) === i ? "selected" : ""}>${d}</option>`).join("")}</select>
     </div>
     <div class="row"><label>End Date (optional)</label><input id="f-end" type="date" value="${existing.endDate || ""}" /></div>
+    <div class="row"><label>Transfers to Account</label>
+      <select id="f-transfer">
+        <option value="" ${!existing.transfersToAccount ? "selected" : ""}>— No, it's a normal outflow —</option>
+        <option value="eb-savings" ${existing.transfersToAccount === "eb-savings" ? "selected" : ""}>EB Savings</option>
+      </select>
+    </div>
+    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">If this payment is actually a transfer to another account (like the annual bonus sweep to EB Savings), pick it here — it'll keep posting as a Basin Checking outflow exactly as before, and also show up as that account's inflow on the same week.</div>
     <div class="modal-actions">
       ${isEdit ? `<button class="btn-ghost" id="f-del">Delete</button>` : ""}
       <button class="btn-ghost" id="f-cancel">Cancel</button>
@@ -1981,6 +2203,7 @@ function openFixedModal(store, existing) {
           dayOfMonth: Number(host.querySelector("#f-dom").value || 1),
           weekday: Number(host.querySelector("#f-dow").value || 4),
           endDate: host.querySelector("#f-end").value || null,
+          transfersToAccount: host.querySelector("#f-transfer").value || null,
           active: existing.active !== false,
         };
         store.mutate((s) => {

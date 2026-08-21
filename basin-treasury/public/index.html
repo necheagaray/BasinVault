@@ -114,7 +114,8 @@
     </div>
 
     <nav class="tabs" id="tabs">
-      <button data-view="forecast" class="active">CF Forecast</button>
+      <button data-view="home" class="active">🏠 Home</button>
+      <button data-view="forecast">CF Forecast</button>
       <button data-view="receivables">Existing AR</button>
       <button data-view="unbilled">Unbilled AR</button>
       <button data-view="payables">Payables</button>
@@ -132,8 +133,20 @@
 
   <main>
 
+    <!-- ===================== HOME ===================== -->
+    <section class="view active" id="view-home">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">Accounts Overview</div>
+          <h2>Cash Position</h2>
+          <div class="meta" id="home-meta"></div>
+        </div>
+      </div>
+      <div id="home-accounts"></div>
+    </section>
+
     <!-- ===================== CF FORECAST ===================== -->
-    <section class="view active" id="view-forecast">
+    <section class="view" id="view-forecast">
       <div class="frozen-head" id="forecast-frozen-head">
         <div class="page-head">
           <div>
@@ -142,6 +155,7 @@
             <div class="meta" id="forecast-meta"></div>
           </div>
           <div class="page-head-actions">
+            <select class="period-select" id="account-select"></select>
             <select class="period-select" id="period-select"></select>
             <button class="btn-ghost" id="btn-roll-forward" title="Drop the completed week, shift everything up, and open a new week at the end">⟳ Roll Forward</button>
           </div>
@@ -194,7 +208,7 @@
           <thead><tr>
             <th style="width:30px;"><input type="checkbox" id="ar-select-all" /></th>
             <th class="sortable" data-sort="customer">Customer <span class="sort-arrow"></span></th><th>Type</th><th>Invoice #</th><th class="sortable" data-sort="date">Date <span class="sort-arrow"></span></th><th>PO #</th>
-            <th>Days →</th><th>CF Date</th><th>Age</th><th class="num">Balance</th><th>Status</th><th></th>
+            <th>Days →</th><th>CF Date</th><th>Deposits To</th><th>Age</th><th class="num">Balance</th><th>Status</th><th></th>
           </tr></thead>
           <tbody id="ar-tbody"></tbody>
         </table>

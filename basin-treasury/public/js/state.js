@@ -12,6 +12,48 @@ export const FIXED_CATEGORY_ORDER = [
 ];
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// The 5 cash accounts this app tracks. Basin Checking is the original/primary
+// account — its own data shape (period.openingCash, .payroll, .overrides, etc.)
+// is untouched by any of this; everything below is additive.
+export const ACCOUNTS = [
+  { id: "basin-checking", name: "Basin Checking", isMain: true },
+  { id: "pc-checking", name: "P&C Checking", isMain: false },
+  { id: "eb-savings", name: "EB Savings", isMain: false },
+  { id: "basin-savings", name: "Basin Savings", isMain: false },
+  { id: "pc-savings", name: "P&C Savings", isMain: false },
+];
+
+// Each transfer link is editable on the "from" side (an outflow there) and
+// mirrored, read-only, as an inflow on the "to" side — one number driving
+// both, so the two accounts can never disagree about a transfer amount.
+export const TRANSFER_LINKS = [
+  { id: "toBasinSavings", label: "Transfer to Basin Savings", from: "basin-checking", to: "basin-savings" },
+  { id: "fromBasinSavings", label: "Transfer from Basin Savings", from: "basin-savings", to: "basin-checking" },
+  { id: "toPcSavings", label: "Transfer to P&C Savings", from: "pc-checking", to: "pc-savings" },
+  { id: "fromPcSavingsToBasin", label: "Return from P&C Savings", from: "pc-savings", to: "basin-checking" },
+];
+
+export function accountName(id) {
+  return ACCOUNTS.find((a) => a.id === id)?.name || id;
+}
+
+// Fills in the new multi-account fields on a period that predates this
+// feature, without touching anything it already has.
+export function migratePeriod(period) {
+  if (period.pcOpeningCash === undefined) period.pcOpeningCash = 0;
+  if (period.ebOpeningCash === undefined) period.ebOpeningCash = 0;
+  if (period.basinSavingsOpeningCash === undefined) period.basinSavingsOpeningCash = 0;
+  if (period.pcSavingsOpeningCash === undefined) period.pcSavingsOpeningCash = 0;
+  if (!period.pcPayroll) period.pcPayroll = { amount: 0, weeks: [] };
+  if (!period.pcK401) period.pcK401 = { amount: 0, weeks: [] };
+  if (!period.pcOtherOutflow) period.pcOtherOutflow = {};
+  if (!period.transfers) period.transfers = {};
+  for (const link of TRANSFER_LINKS) {
+    if (!period.transfers[link.id]) period.transfers[link.id] = {};
+  }
+  return period;
+}
+
 export function defaultState() {
   const start = mostRecentSunday();
   return {
@@ -59,6 +101,21 @@ export function makePeriod(id, label, startISO) {
       apPayables: {},
       locDraw: {},
     },
+
+    // --- P&C Checking ---
+    pcOpeningCash: 0,
+    pcPayroll: { amount: 0, weeks: [] },
+    pcK401: { amount: 0, weeks: [] },
+    pcOtherOutflow: {}, // { [weekIndex]: { v, by, at } } — same override shape as everything else
+
+    // --- EB Savings / Basin Savings / P&C Savings opening balances ---
+    ebOpeningCash: 0,
+    basinSavingsOpeningCash: 0,
+    pcSavingsOpeningCash: 0,
+
+    // --- Inter-account transfers, keyed by TRANSFER_LINKS id ---
+    // { [linkId]: { [weekIndex]: { v, by, at } } }
+    transfers: { toBasinSavings: {}, fromBasinSavings: {}, toPcSavings: {}, fromPcSavingsToBasin: {} },
   };
 }
 
@@ -139,6 +196,10 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   const n = Math.max(1, Math.min(WEEKS_PER_PERIOD - 1, Math.round(weeksToRoll)));
 
   const calc = computeForecast(state, old);
+  const pcCalc = computeSimpleAccountForecast(state, old, "pc-checking");
+  const ebCalc = computeSimpleAccountForecast(state, old, "eb-savings");
+  const basinSavingsCalc = computeSimpleAccountForecast(state, old, "basin-savings");
+  const pcSavingsCalc = computeSimpleAccountForecast(state, old, "pc-savings");
   const newStart = toISO(addDays(old.startDate, 7 * n));
   const lastDropped = calc.weeks[n - 1]; // the last of the completed weeks being dropped
 
@@ -149,6 +210,18 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   next.k401 = { amount: old.k401?.amount || 0, weeks: shiftWeeksArray(old.k401?.weeks, n) };
   next.overrides = shiftOverrides(old.overrides, n);
   next.notes = shiftNotes(old.notes, n);
+
+  // the other 4 accounts — each carries forward its own closing balance,
+  // payroll/401k weeks (P&C), and shifted manual entries the same way
+  next.pcOpeningCash = Math.round(pcCalc.weeks[n - 1].closing * 100) / 100;
+  next.ebOpeningCash = Math.round(ebCalc.weeks[n - 1].closing * 100) / 100;
+  next.basinSavingsOpeningCash = Math.round(basinSavingsCalc.weeks[n - 1].closing * 100) / 100;
+  next.pcSavingsOpeningCash = Math.round(pcSavingsCalc.weeks[n - 1].closing * 100) / 100;
+  next.pcPayroll = { amount: old.pcPayroll?.amount || 0, weeks: shiftWeeksArray(old.pcPayroll?.weeks, n) };
+  next.pcK401 = { amount: old.pcK401?.amount || 0, weeks: shiftWeeksArray(old.pcK401?.weeks, n) };
+  next.pcOtherOutflow = shiftWeekMap(old.pcOtherOutflow, n);
+  next.transfers = {};
+  for (const link of TRANSFER_LINKS) next.transfers[link.id] = shiftWeekMap(old.transfers?.[link.id], n);
 
   // Anything still open that was sitting in one of the now-dropped weeks is
   // presumed handled by now — close it out so it stops counting toward the
@@ -317,6 +390,7 @@ export function computeForecast(state, period) {
   const scheduledReceivables = Array(WEEKS_PER_PERIOD).fill(0);
   const scheduledPayables = Array(WEEKS_PER_PERIOD).fill(0);
   for (const r of state.receivables) {
+    if ((r.depositAccount || "basin-checking") !== "basin-checking") continue;
     const wi = r.status === "paid" ? weekIndexForDateStrict(period, r.cfDate) : weekIndexForDate(period, r.cfDate);
     if (wi === null) continue;
     scheduledReceivables[wi] += (r.originalBalance ?? r.balance);
@@ -383,6 +457,16 @@ export function computeForecast(state, period) {
     const netCashflow = totalInflows + totalOutflows;
     const locDraw = readOv(ov.locDraw?.[wi]) ?? 0;
 
+    // Inter-account transfers. "Transfer to Basin Savings" is editable here
+    // (same convention as every other outflow cell — type it as negative).
+    // The other two are read-only mirrors of an edit made on the OTHER
+    // account's own page, so there's exactly one place each transfer amount
+    // actually gets typed in, never two conflicting entries for the same transfer.
+    const transferToBasinSavings = readOv(period.transfers?.toBasinSavings?.[wi]) ?? 0;
+    const transferFromBasinSavings = -(readOv(period.transfers?.fromBasinSavings?.[wi]) ?? 0);
+    const transferFromPcSavings = -(readOv(period.transfers?.fromPcSavingsToBasin?.[wi]) ?? 0);
+    const transfersNet = transferToBasinSavings + transferFromBasinSavings + transferFromPcSavings;
+
     return {
       week: w,
       receivablesCollected, receivablesScheduled: scheduledReceivables[wi],
@@ -391,6 +475,7 @@ export function computeForecast(state, period) {
       fixedRows, fixedTotal,
       apPayables, apScheduled: -scheduledPayables[wi],
       totalOutflows, netCashflow, locDraw,
+      transferToBasinSavings, transferFromBasinSavings, transferFromPcSavings, transfersNet,
     };
   });
 
@@ -398,7 +483,7 @@ export function computeForecast(state, period) {
   let opening = period.openingCash || 0;
   for (const row of rows) {
     row.opening = opening;
-    row.closing = opening + row.netCashflow + row.locDraw;
+    row.closing = opening + row.netCashflow + row.locDraw + row.transfersNet;
     opening = row.closing;
   }
 
@@ -427,6 +512,10 @@ export function computeForecast(state, period) {
     netCashflow: sum(rows.map((r) => r.netCashflow)),
     locDraw: sum(rows.map((r) => r.locDraw)),
     locBalance: rows[rows.length - 1]?.locBalance ?? (period.locOpeningBalance || 0),
+    transferToBasinSavings: sum(rows.map((r) => r.transferToBasinSavings)),
+    transferFromBasinSavings: sum(rows.map((r) => r.transferFromBasinSavings)),
+    transferFromPcSavings: sum(rows.map((r) => r.transferFromPcSavings)),
+    transfersNet: sum(rows.map((r) => r.transfersNet)),
   };
 
   return { weeks: rows, totals, fixedCategories };
@@ -434,7 +523,105 @@ export function computeForecast(state, period) {
 
 function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
 
-/* ------------------------------ multi-user merge ------------------------------ */
+// Simplified weekly cash flow for the 4 accounts besides Basin Checking — each
+// has a much smaller, fixed set of line items (no Aged AR/AP-scale detail),
+// so this returns a generic { inflows: [...], outflows: [...] } shape per
+// week that one shared UI renderer can handle for all four.
+export function computeSimpleAccountForecast(state, period, accountId) {
+  const weeks = periodWeeks(period);
+  const openingKey = { "pc-checking": "pcOpeningCash", "eb-savings": "ebOpeningCash", "basin-savings": "basinSavingsOpeningCash", "pc-savings": "pcSavingsOpeningCash" }[accountId];
+  const scheduled = Array(WEEKS_PER_PERIOD).fill(0); // per-week "primary" scheduled inflow, meaning depends on account
+
+  if (accountId === "pc-checking") {
+    for (const r of state.receivables) {
+      if ((r.depositAccount || "basin-checking") !== "pc-checking") continue;
+      const wi = r.status === "paid" ? weekIndexForDateStrict(period, r.cfDate) : weekIndexForDate(period, r.cfDate);
+      if (wi === null) continue;
+      scheduled[wi] += (r.originalBalance ?? r.balance);
+    }
+  }
+  if (accountId === "eb-savings") {
+    for (const item of state.fixedPayments) {
+      if (item.active === false || item.transfersToAccount !== "eb-savings") continue;
+      for (const dateISO of fixedOccurrencesInPeriod(item, period)) {
+        const wi = weekIndexForDate(period, dateISO);
+        if (wi !== null) scheduled[wi] += item.amount;
+      }
+    }
+  }
+
+  const pcPayrollAmount = period.pcPayroll?.amount || 0;
+  const pcK401Amount = period.pcK401?.amount || 0;
+  const pcPayrollWeeks = (period.pcPayroll?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
+  const pcK401Weeks = (period.pcK401?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
+
+  const rows = weeks.map((w) => {
+    const wi = w.index;
+    const inflows = [];
+    const outflows = [];
+
+    if (accountId === "pc-checking") {
+      inflows.push({ key: "receivablesCollected", label: "Receivables Collected", amount: scheduled[wi], editable: false });
+      if (pcPayrollAmount && pcPayrollWeeks.includes(wi)) outflows.push({ key: "pcPayroll", label: "Payroll", amount: -pcPayrollAmount, editable: false });
+      if (pcK401Amount && pcK401Weeks.includes(wi)) outflows.push({ key: "pcK401", label: "401K", amount: -pcK401Amount, editable: false });
+      outflows.push({ key: "pcOtherOutflow", label: "Other Outflow", amount: readOv(period.pcOtherOutflow?.[wi]) ?? 0, editable: true });
+      // editable here (this is the "from" side) — type as negative, same convention as every other outflow
+      outflows.push({ key: "toPcSavings", label: "Transfer to P&C Savings", amount: readOv(period.transfers?.toPcSavings?.[wi]) ?? 0, editable: true });
+    }
+
+    if (accountId === "eb-savings") {
+      inflows.push({ key: "bonusTransfer", label: "Transfer from Basin Checking", amount: scheduled[wi], editable: false });
+    }
+
+    if (accountId === "basin-savings") {
+      // read-only mirror of Basin Checking's own "Transfer to Basin Savings" edit
+      const inAmt = -(readOv(period.transfers?.toBasinSavings?.[wi]) ?? 0);
+      inflows.push({ key: "fromBasinChecking", label: "Transfer from Basin Checking", amount: inAmt, editable: false });
+      // editable here (this is the "from" side for the return trip) — negative = leaving this account
+      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: readOv(period.transfers?.fromBasinSavings?.[wi]) ?? 0, editable: true });
+    }
+
+    if (accountId === "pc-savings") {
+      // read-only mirror of P&C Checking's own "Transfer to P&C Savings" edit
+      const inAmt = -(readOv(period.transfers?.toPcSavings?.[wi]) ?? 0);
+      inflows.push({ key: "fromPcChecking", label: "Transfer from P&C Checking", amount: inAmt, editable: false });
+      // editable here — negative = leaving this account, goes to Basin Checking (not back to P&C Checking)
+      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: readOv(period.transfers?.fromPcSavingsToBasin?.[wi]) ?? 0, editable: true });
+    }
+
+    const inflowTotal = sum(inflows.map((r) => r.amount));
+    const outflowTotal = sum(outflows.map((r) => r.amount));
+    return { week: w, inflows, outflows, inflowTotal, outflowTotal, netCashflow: inflowTotal + outflowTotal };
+  });
+
+  let opening = period[openingKey] || 0;
+  for (const row of rows) {
+    row.opening = opening;
+    row.closing = opening + row.netCashflow;
+    opening = row.closing;
+  }
+
+  return {
+    weeks: rows,
+    totals: {
+      opening: rows[0]?.opening ?? 0,
+      closing: rows[rows.length - 1]?.closing ?? 0,
+      inflowTotal: sum(rows.map((r) => r.inflowTotal)),
+      outflowTotal: sum(rows.map((r) => r.outflowTotal)),
+      netCashflow: sum(rows.map((r) => r.netCashflow)),
+    },
+  };
+}
+
+// Single entry point for "give me this account's forecast" — Basin Checking
+// keeps its full-detail computeForecast; everything else uses the simplified
+// version above.
+export function computeForecastForAccount(state, period, accountId) {
+  if (accountId === "basin-checking" || !accountId) return computeForecast(state, period);
+  return computeSimpleAccountForecast(state, period, accountId);
+}
+
+
 // Two people can be editing at once. Rather than blindly overwriting the whole
 // saved blob (last-write-wins at the document level, which silently drops
 // whichever person saved first), we merge field-by-field: CF-grid overrides
@@ -474,6 +661,16 @@ function mergeOverrides(localOv, remoteOv) {
     for (const cat of cats) merged[key][cat] = mergeTimestampedMap((localOv[key] || {})[cat], (remoteOv[key] || {})[cat]);
   }
   return merged;
+}
+
+function mergeTransfers(localT, remoteT) {
+  localT = localT || {};
+  remoteT = remoteT || {};
+  const out = {};
+  for (const link of TRANSFER_LINKS) {
+    out[link.id] = mergeTimestampedMap(localT[link.id], remoteT[link.id]);
+  }
+  return out;
 }
 
 function timeOfRecord(r) {
@@ -529,7 +726,13 @@ export function mergeStates(local, remote) {
   merged.periods = remote.periods.map((rp) => {
     const lp = local.periods.find((p) => p.id === rp.id);
     if (!lp) return rp;
-    return { ...rp, ...lp, overrides: mergeOverrides(lp.overrides, rp.overrides), notes: { ...rp.notes, ...lp.notes } };
+    return {
+      ...rp, ...lp,
+      overrides: mergeOverrides(lp.overrides, rp.overrides),
+      notes: { ...rp.notes, ...lp.notes },
+      transfers: mergeTransfers(lp.transfers, rp.transfers),
+      pcOtherOutflow: mergeTimestampedMap(lp.pcOtherOutflow, rp.pcOtherOutflow),
+    };
   });
   for (const lp of local.periods) {
     if (!merged.periods.find((p) => p.id === lp.id)) merged.periods.push(lp); // period created locally, not yet on server

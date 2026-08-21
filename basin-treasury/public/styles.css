@@ -867,3 +867,36 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   color:var(--text-dim); font-size:12.5px; cursor:default;
 }
+
+.account-card{
+  cursor:pointer; margin-bottom:16px; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.account-card:hover{ transform:translateY(-3px); border-color:var(--brass); box-shadow:0 18px 34px -18px rgba(0,0,0,0.8), 0 0 0 1px rgba(200,163,90,0.25); }
+.account-card.main-account{
+  border-color:var(--brass); border-width:2px;
+  background:linear-gradient(165deg, rgba(200,163,90,0.08) 0%, var(--bg-panel) 60%);
+  box-shadow:0 0 32px -10px rgba(200,163,90,0.35);
+}
+.main-account-badge{
+  font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em;
+  color:#171106; background:var(--brass-bright); display:inline-block;
+  padding:4px 12px; border-radius:20px; margin-bottom:12px;
+}
+.account-card-name{ font-family:'Oswald', var(--font-display); font-size:20px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-hi); margin-bottom:14px; }
+.account-card-figures{ display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; margin-bottom:14px; }
+.account-card-figures .label{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim); margin-bottom:4px; }
+.account-card-figures .value{ font-family:var(--font-mono); font-size:17px; font-weight:700; color:var(--text-hi); }
+.account-card-figures .value.green{ color:var(--green); }
+.account-card-figures .value.red{ color:var(--red); }
+.account-card-figures .value.brass{ color:var(--brass-bright); }
+.account-card-cta{
+  font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--brass);
+  border-top:1px solid var(--line); padding-top:12px;
+}
+.account-card-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; }
+.account-card-grid .account-card{ margin-bottom:0; }
+.account-card-grid .account-card-name{ font-size:16px; }
+.account-card-grid .account-card-figures{ grid-template-columns:1fr; gap:8px; }
+.account-card-grid .account-card-figures > div{ display:flex; align-items:baseline; justify-content:space-between; }
+.account-card-grid .account-card-figures .label{ margin-bottom:0; }
+.account-card-grid .account-card-figures .value{ font-size:14px; }
