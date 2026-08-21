@@ -357,11 +357,11 @@ export function renderHome(store) {
 
   const calcFor = (id) => (id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id));
 
-  const cardHtml = (acct) => {
+  const cardHtml = (acct, extraClass = "") => {
     const calc = calcFor(acct.id);
     const netTotal = calc.totals.netCashflow;
     return `
-      <div class="panel account-card ${acct.isMain ? "main-account" : ""}" data-account="${acct.id}" role="button" tabindex="0">
+      <div class="panel account-card ${acct.isMain ? "main-account" : ""} ${extraClass}" data-account="${acct.id}" role="button" tabindex="0" style="grid-area:${acct.id};">
         ${acct.isMain ? `<div class="main-account-badge">★ MAIN OPERATING ACCOUNT</div>` : ""}
         <div class="account-card-name">${escapeHtml(acct.name)}</div>
         <div class="account-card-figures">
@@ -373,12 +373,16 @@ export function renderHome(store) {
       </div>`;
   };
 
-  const main = ACCOUNTS.find((a) => a.isMain);
-  const rest = ACCOUNTS.filter((a) => !a.isMain);
+  const byId = Object.fromEntries(ACCOUNTS.map((a) => [a.id, a]));
 
   document.getElementById("home-accounts").innerHTML = `
-    ${cardHtml(main)}
-    <div class="account-card-grid">${rest.map(cardHtml).join("")}</div>
+    <div class="home-account-layout">
+      ${cardHtml(byId["basin-checking"], "layout-basin-checking")}
+      ${cardHtml(byId["basin-savings"], "layout-basin-savings")}
+      ${cardHtml(byId["pc-checking"], "layout-pc-checking")}
+      ${cardHtml(byId["pc-savings"], "layout-pc-savings")}
+      ${cardHtml(byId["eb-savings"], "layout-eb-savings")}
+    </div>
   `;
 
   document.querySelectorAll(".account-card").forEach((card) => {
@@ -445,13 +449,28 @@ function renderHomeSummaries(store, period) {
 
   // weekly closing balance for every account, end of each week
   const calcFor = (id) => (id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id));
-  const rows = ACCOUNTS.map((a) => {
-    const calc = calcFor(a.id);
-    return `<tr class="${a.isMain ? "home-balance-main" : ""}">
-      <td>${a.isMain ? "★ " : ""}${escapeHtml(a.name)}</td>
-      ${calc.weeks.map((w) => `<td class="num">${fmtMoney(w.closing)}</td>`).join("")}
-    </tr>`;
-  }).join("");
+  const closingsFor = (id) => calcFor(id).weeks.map((w) => w.closing);
+  const byId = Object.fromEntries(ACCOUNTS.map((a) => [a.id, closingsFor(a.id)]));
+
+  const acctRow = (id, label, isMain) => `<tr class="${isMain ? "home-balance-main" : ""}">
+    <td>${isMain ? "★ " : ""}${escapeHtml(label)}</td>
+    ${byId[id].map((v) => `<td class="num">${fmtMoney(v)}</td>`).join("")}
+  </tr>`;
+
+  const totalRow = (label, ids) => `<tr class="home-balance-total">
+    <td>${escapeHtml(label)}</td>
+    ${weeksMeta.map((w, wi) => `<td class="num">${fmtMoney(sum(ids.map((id) => byId[id][wi])))}</td>`).join("")}
+  </tr>`;
+
+  const rows = [
+    acctRow("basin-checking", "Basin Checking", true),
+    acctRow("basin-savings", "Basin Savings", false),
+    totalRow("Basin Total", ["basin-checking", "basin-savings"]),
+    acctRow("eb-savings", "EB Savings", false),
+    acctRow("pc-checking", "P&C Checking", false),
+    acctRow("pc-savings", "P&C Savings", false),
+    totalRow("P&C Total", ["pc-checking", "pc-savings"]),
+  ].join("");
 
   document.getElementById("home-balances").innerHTML = `
     <div class="panel">
