@@ -200,3 +200,38 @@ function wobblyCircle(cx, cy, r, wobble, seed) {
   }
   return `M ${pts.join(" L ")} Z`;
 }
+
+// Bank-vault door — concentric rings, a ring of locking bolts, and radial
+// spokes converging on a central hub. Decorative background for the Home
+// page; meant to sit large, mostly off-canvas, and rotate extremely slowly.
+export function vaultDoorSVG(size = 1000) {
+  const c = size / 2;
+  const rings = [0.94, 0.82, 0.70, 0.60].map((f, i) =>
+    `<circle cx="${c}" cy="${c}" r="${c * f}" fill="none" stroke="#c8a35a" stroke-width="${i === 0 ? 2.5 : 1}" opacity="${0.5 - i * 0.08}"/>`
+  ).join("");
+
+  const boltCount = 16;
+  const bolts = Array.from({ length: boltCount }, (_, i) => {
+    const a = (i / boltCount) * Math.PI * 2;
+    const r = c * 0.88;
+    const x = c + Math.cos(a) * r, y = c + Math.sin(a) * r;
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${size * 0.014}" fill="#c8a35a" opacity="0.55"/>`;
+  }).join("");
+
+  const spokeCount = 8;
+  const spokes = Array.from({ length: spokeCount }, (_, i) => {
+    const a = (i / spokeCount) * Math.PI * 2;
+    const r1 = c * 0.32, r2 = c * 0.6;
+    const x1 = c + Math.cos(a) * r1, y1 = c + Math.sin(a) * r1;
+    const x2 = c + Math.cos(a) * r2, y2 = c + Math.sin(a) * r2;
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#c8a35a" stroke-width="1.4" opacity="0.4"/>`;
+  }).join("");
+
+  const hub = `
+    <circle cx="${c}" cy="${c}" r="${c * 0.3}" fill="none" stroke="#c8a35a" stroke-width="2" opacity="0.55"/>
+    <circle cx="${c}" cy="${c}" r="${c * 0.22}" fill="none" stroke="#c8a35a" stroke-width="1" opacity="0.4"/>
+    <circle cx="${c}" cy="${c}" r="${size * 0.02}" fill="#c8a35a" opacity="0.6"/>
+  `;
+
+  return `<svg viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${rings}${spokes}${bolts}${hub}</svg>`;
+}

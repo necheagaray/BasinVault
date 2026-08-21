@@ -146,17 +146,34 @@ function extractRecords(rows, kind /* 'AR' | 'AP' */) {
   return records;
 }
 
+function findAsOfDate(rows) {
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    for (const cell of rows[i] || []) {
+      const s = cellStr(cell);
+      const m = s.match(/as of\s+([A-Za-z]+\.?\s+\d{1,2},?\s*\d{4})/i);
+      if (m) {
+        const d = new Date(m[1].replace(/,/g, ""));
+        if (!isNaN(d.getTime())) {
+          const pad = (n) => String(n).padStart(2, "0");
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 // text-based formats: NetSuite's SpreadsheetML .xml export, or a .csv with the same headers
 export function parseAgingReport(text, kind) {
   const looksXml = /^\s*<\?xml/.test(text) || text.includes("<Workbook");
   const rows = looksXml ? parseXmlRows(text) : parseCsvRows(text);
-  return extractRecords(rows, kind);
+  return { records: extractRecords(rows, kind), asOfDate: findAsOfDate(rows) };
 }
 
 // native .xlsx workbook
 export function parseAgingWorkbook(arrayBuffer, kind) {
   const rows = parseXlsxRows(arrayBuffer);
-  return extractRecords(rows, kind);
+  return { records: extractRecords(rows, kind), asOfDate: findAsOfDate(rows) };
 }
 
 // --------------------------------------------------------------------------

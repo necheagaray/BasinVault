@@ -18,19 +18,20 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export const ACCOUNTS = [
   { id: "basin-checking", name: "Basin Checking", isMain: true },
   { id: "pc-checking", name: "P&C Checking", isMain: false },
-  { id: "eb-savings", name: "EB Savings", isMain: false },
-  { id: "basin-savings", name: "Basin Savings", isMain: false },
   { id: "pc-savings", name: "P&C Savings", isMain: false },
+  { id: "basin-savings", name: "Basin Savings", isMain: false },
+  { id: "eb-savings", name: "EB Savings", isMain: false },
 ];
 
 // Each transfer link is editable on the "from" side (an outflow there) and
 // mirrored, read-only, as an inflow on the "to" side — one number driving
 // both, so the two accounts can never disagree about a transfer amount.
+// The only remaining simple (one-directional, single-editable-side) transfer
+// link — P&C Checking's own sweep to its savings account. The Basin Checking
+// <-> Basin Savings and Basin Checking <-> P&C Savings relationships are each
+// a single bidirectional signed field instead (see makePeriod's `transfers`).
 export const TRANSFER_LINKS = [
-  { id: "toBasinSavings", label: "Transfer to Basin Savings", from: "basin-checking", to: "basin-savings" },
-  { id: "fromBasinSavings", label: "Transfer from Basin Savings", from: "basin-savings", to: "basin-checking" },
   { id: "toPcSavings", label: "Transfer to P&C Savings", from: "pc-checking", to: "pc-savings" },
-  { id: "fromPcSavingsToBasin", label: "Return from P&C Savings", from: "pc-savings", to: "basin-checking" },
 ];
 
 export function accountName(id) {
@@ -48,6 +49,26 @@ export function migratePeriod(period) {
   if (!period.pcK401) period.pcK401 = { amount: 0, weeks: [] };
   if (!period.pcOtherOutflow) period.pcOtherOutflow = {};
   if (!period.transfers) period.transfers = {};
+
+  // migrate the old separate toBasinSavings/fromBasinSavings and
+  // fromPcSavingsToBasin fields (if present, from before this was
+  // consolidated) into the new single signed fields
+  if (!period.transfers.basinSavingsTransfer) {
+    const out = period.transfers.toBasinSavings || {};
+    const back = period.transfers.fromBasinSavings || {};
+    const merged = {};
+    for (const wi of new Set([...Object.keys(out), ...Object.keys(back)])) {
+      merged[wi] = out[wi] ?? back[wi];
+    }
+    period.transfers.basinSavingsTransfer = merged;
+  }
+  if (!period.transfers.pcSavingsTransfer) {
+    period.transfers.pcSavingsTransfer = period.transfers.fromPcSavingsToBasin || {};
+  }
+  delete period.transfers.toBasinSavings;
+  delete period.transfers.fromBasinSavings;
+  delete period.transfers.fromPcSavingsToBasin;
+
   for (const link of TRANSFER_LINKS) {
     if (!period.transfers[link.id]) period.transfers[link.id] = {};
   }
@@ -73,6 +94,8 @@ export function defaultState() {
     // people's edits get merged, a deleted item doesn't silently reappear just
     // because the other copy being merged in is older and still has it.
     tombstones: { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} },
+    arAsOfDate: null, // "as of" date pulled from the most recent Aged AR import's report header
+    apAsOfDate: null,
   };
 }
 
@@ -115,7 +138,13 @@ export function makePeriod(id, label, startISO) {
 
     // --- Inter-account transfers, keyed by TRANSFER_LINKS id ---
     // { [linkId]: { [weekIndex]: { v, by, at } } }
-    transfers: { toBasinSavings: {}, fromBasinSavings: {}, toPcSavings: {}, fromPcSavingsToBasin: {} },
+    // basinSavingsTransfer and pcSavingsTransfer are each ONE signed field per
+    // week, editable only here on Basin Checking (same convention as LOC Draw):
+    // negative = money leaving Basin Checking into that savings account,
+    // positive = money arriving in Basin Checking from that savings account.
+    // toPcSavings is the separate P&C Checking -> P&C Savings sweep, unrelated
+    // to Basin Checking, and stays editable on P&C Checking's own page.
+    transfers: { basinSavingsTransfer: {}, pcSavingsTransfer: {}, toPcSavings: {} },
   };
 }
 
@@ -221,7 +250,7 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   next.pcK401 = { amount: old.pcK401?.amount || 0, weeks: shiftWeeksArray(old.pcK401?.weeks, n) };
   next.pcOtherOutflow = shiftWeekMap(old.pcOtherOutflow, n);
   next.transfers = {};
-  for (const link of TRANSFER_LINKS) next.transfers[link.id] = shiftWeekMap(old.transfers?.[link.id], n);
+  for (const key of ["basinSavingsTransfer", "pcSavingsTransfer", "toPcSavings"]) next.transfers[key] = shiftWeekMap(old.transfers?.[key], n);
 
   // Anything still open that was sitting in one of the now-dropped weeks is
   // presumed handled by now — close it out so it stops counting toward the
@@ -457,15 +486,13 @@ export function computeForecast(state, period) {
     const netCashflow = totalInflows + totalOutflows;
     const locDraw = readOv(ov.locDraw?.[wi]) ?? 0;
 
-    // Inter-account transfers. "Transfer to Basin Savings" is editable here
-    // (same convention as every other outflow cell — type it as negative).
-    // The other two are read-only mirrors of an edit made on the OTHER
-    // account's own page, so there's exactly one place each transfer amount
-    // actually gets typed in, never two conflicting entries for the same transfer.
-    const transferToBasinSavings = readOv(period.transfers?.toBasinSavings?.[wi]) ?? 0;
-    const transferFromBasinSavings = -(readOv(period.transfers?.fromBasinSavings?.[wi]) ?? 0);
-    const transferFromPcSavings = -(readOv(period.transfers?.fromPcSavingsToBasin?.[wi]) ?? 0);
-    const transfersNet = transferToBasinSavings + transferFromBasinSavings + transferFromPcSavings;
+    // Inter-account transfers with the two savings accounts — each is ONE
+    // signed field, editable here (same convention as LOC Draw): negative =
+    // money leaving Basin Checking into that savings account, positive =
+    // money arriving in Basin Checking from that savings account.
+    const basinSavingsTransfer = readOv(period.transfers?.basinSavingsTransfer?.[wi]) ?? 0;
+    const pcSavingsTransfer = readOv(period.transfers?.pcSavingsTransfer?.[wi]) ?? 0;
+    const transfersNet = basinSavingsTransfer + pcSavingsTransfer;
 
     return {
       week: w,
@@ -475,7 +502,7 @@ export function computeForecast(state, period) {
       fixedRows, fixedTotal,
       apPayables, apScheduled: -scheduledPayables[wi],
       totalOutflows, netCashflow, locDraw,
-      transferToBasinSavings, transferFromBasinSavings, transferFromPcSavings, transfersNet,
+      basinSavingsTransfer, pcSavingsTransfer, transfersNet,
     };
   });
 
@@ -512,9 +539,8 @@ export function computeForecast(state, period) {
     netCashflow: sum(rows.map((r) => r.netCashflow)),
     locDraw: sum(rows.map((r) => r.locDraw)),
     locBalance: rows[rows.length - 1]?.locBalance ?? (period.locOpeningBalance || 0),
-    transferToBasinSavings: sum(rows.map((r) => r.transferToBasinSavings)),
-    transferFromBasinSavings: sum(rows.map((r) => r.transferFromBasinSavings)),
-    transferFromPcSavings: sum(rows.map((r) => r.transferFromPcSavings)),
+    basinSavingsTransfer: sum(rows.map((r) => r.basinSavingsTransfer)),
+    pcSavingsTransfer: sum(rows.map((r) => r.pcSavingsTransfer)),
     transfersNet: sum(rows.map((r) => r.transfersNet)),
   };
 
@@ -574,19 +600,23 @@ export function computeSimpleAccountForecast(state, period, accountId) {
     }
 
     if (accountId === "basin-savings") {
-      // read-only mirror of Basin Checking's own "Transfer to Basin Savings" edit
-      const inAmt = -(readOv(period.transfers?.toBasinSavings?.[wi]) ?? 0);
-      inflows.push({ key: "fromBasinChecking", label: "Transfer from Basin Checking", amount: inAmt, editable: false });
-      // editable here (this is the "from" side for the return trip) — negative = leaving this account
-      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: readOv(period.transfers?.fromBasinSavings?.[wi]) ?? 0, editable: true });
+      // Fully mirrored — editable only on Basin Checking's own page now.
+      // Negative there = arriving here; positive there = leaving here.
+      const bst = readOv(period.transfers?.basinSavingsTransfer?.[wi]) ?? 0;
+      inflows.push({ key: "fromBasinChecking", label: "Transfer from Basin Checking", amount: bst < 0 ? -bst : 0, editable: false });
+      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: bst > 0 ? -bst : 0, editable: false });
     }
 
     if (accountId === "pc-savings") {
       // read-only mirror of P&C Checking's own "Transfer to P&C Savings" edit
       const inAmt = -(readOv(period.transfers?.toPcSavings?.[wi]) ?? 0);
       inflows.push({ key: "fromPcChecking", label: "Transfer from P&C Checking", amount: inAmt, editable: false });
-      // editable here — negative = leaving this account, goes to Basin Checking (not back to P&C Checking)
-      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: readOv(period.transfers?.fromPcSavingsToBasin?.[wi]) ?? 0, editable: true });
+      // the Basin Checking <-> P&C Savings leg — fully mirrored, editable only
+      // on Basin Checking's page. Negative there = arriving here (direct from
+      // Basin Checking); positive there = leaving here back to Basin Checking.
+      const pst = readOv(period.transfers?.pcSavingsTransfer?.[wi]) ?? 0;
+      inflows.push({ key: "fromBasinCheckingDirect", label: "Transfer from Basin Checking", amount: pst < 0 ? -pst : 0, editable: false });
+      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: pst > 0 ? -pst : 0, editable: false });
     }
 
     const inflowTotal = sum(inflows.map((r) => r.amount));
@@ -667,8 +697,8 @@ function mergeTransfers(localT, remoteT) {
   localT = localT || {};
   remoteT = remoteT || {};
   const out = {};
-  for (const link of TRANSFER_LINKS) {
-    out[link.id] = mergeTimestampedMap(localT[link.id], remoteT[link.id]);
+  for (const key of ["basinSavingsTransfer", "pcSavingsTransfer", "toPcSavings"]) {
+    out[key] = mergeTimestampedMap(localT[key], remoteT[key]);
   }
   return out;
 }

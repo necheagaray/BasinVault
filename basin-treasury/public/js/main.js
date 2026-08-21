@@ -1,11 +1,12 @@
 import * as api from "./api.js";
 import { defaultState, mergeStates, migratePeriod } from "./state.js";
-import { debounce, toast, contourSVG, masterPlanSVG } from "./util.js";
+import { debounce, toast, contourSVG, masterPlanSVG, vaultDoorSVG } from "./util.js";
 import { renderHome, renderForecast, renderReceivables, renderUnbilled, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
 
 document.getElementById("login-contours").innerHTML = contourSVG(3, { w: 900, h: 700 });
 document.getElementById("topbar-contours").innerHTML = contourSVG(7, { w: 1600, h: 100 });
 document.getElementById("settings-blueprint").innerHTML = masterPlanSVG();
+document.getElementById("vault-door-decor").innerHTML = vaultDoorSVG(1100);
 
 const RENDERERS = {
   home: renderHome,

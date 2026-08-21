@@ -46,7 +46,8 @@ function rowValue(weeksRows, rowType, cat, wi) {
     fixed: r.fixedRows[cat],
     apPayables: r.apPayables,
     locDraw: r.locDraw,
-    transferToBasinSavings: r.transferToBasinSavings,
+    basinSavingsTransfer: r.basinSavingsTransfer,
+    pcSavingsTransfer: r.pcSavingsTransfer,
   }[rowType];
 }
 
@@ -57,7 +58,8 @@ function overrideEntry(overrides, rowType, cat, wi, period) {
   if (rowType === "fixed") return overrides.fixedGroup?.[cat]?.[wi];
   if (rowType === "apPayables") return overrides.apPayables[wi];
   if (rowType === "locDraw") return overrides.locDraw[wi];
-  if (rowType === "transferToBasinSavings") return period?.transfers?.toBasinSavings?.[wi];
+  if (rowType === "basinSavingsTransfer") return period?.transfers?.basinSavingsTransfer?.[wi];
+  if (rowType === "pcSavingsTransfer") return period?.transfers?.pcSavingsTransfer?.[wi];
   return undefined;
 }
 
@@ -69,7 +71,8 @@ function writeOverride(period, rowType, cat, wi, stamped) {
   if (rowType === "fixed") { o.fixedGroup[cat] = o.fixedGroup[cat] || {}; setOrDel(o.fixedGroup[cat], wi, stamped); }
   if (rowType === "apPayables") setOrDel(o.apPayables, wi, stamped);
   if (rowType === "locDraw") setOrDel(o.locDraw, wi, stamped);
-  if (rowType === "transferToBasinSavings") { period.transfers.toBasinSavings = period.transfers.toBasinSavings || {}; setOrDel(period.transfers.toBasinSavings, wi, stamped); }
+  if (rowType === "basinSavingsTransfer") { period.transfers.basinSavingsTransfer = period.transfers.basinSavingsTransfer || {}; setOrDel(period.transfers.basinSavingsTransfer, wi, stamped); }
+  if (rowType === "pcSavingsTransfer") { period.transfers.pcSavingsTransfer = period.transfers.pcSavingsTransfer || {}; setOrDel(period.transfers.pcSavingsTransfer, wi, stamped); }
 }
 
 function noteKey(rowType, cat, wi) {
@@ -255,8 +258,6 @@ const SIMPLE_OPENING_KEY = { "pc-checking": "pcOpeningCash", "eb-savings": "ebOp
 function writeSimpleTransferField(period, accountId, key, wi, stamped) {
   if (key === "pcOtherOutflow") { period.pcOtherOutflow = period.pcOtherOutflow || {}; setOrDel(period.pcOtherOutflow, wi, stamped); }
   else if (key === "toPcSavings") { period.transfers.toPcSavings = period.transfers.toPcSavings || {}; setOrDel(period.transfers.toPcSavings, wi, stamped); }
-  else if (key === "toBasinChecking" && accountId === "basin-savings") { period.transfers.fromBasinSavings = period.transfers.fromBasinSavings || {}; setOrDel(period.transfers.fromBasinSavings, wi, stamped); }
-  else if (key === "toBasinChecking" && accountId === "pc-savings") { period.transfers.fromPcSavingsToBasin = period.transfers.fromPcSavingsToBasin || {}; setOrDel(period.transfers.fromPcSavingsToBasin, wi, stamped); }
 }
 
 function renderSimpleAccountForecast(store, period, accountId) {
@@ -361,7 +362,7 @@ export function renderHome(store) {
     const netTotal = calc.totals.netCashflow;
     return `
       <div class="panel account-card ${acct.isMain ? "main-account" : ""}" data-account="${acct.id}" role="button" tabindex="0">
-        ${acct.isMain ? `<div class="main-account-badge">★ MAIN ACCOUNT — MONITOR THIS ONE</div>` : ""}
+        ${acct.isMain ? `<div class="main-account-badge">★ MAIN OPERATING ACCOUNT</div>` : ""}
         <div class="account-card-name">${escapeHtml(acct.name)}</div>
         <div class="account-card-figures">
           <div><div class="label">Opening</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
@@ -388,6 +389,84 @@ export function renderHome(store) {
     });
     card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") card.click(); });
   });
+
+  renderHomeSummaries(store, period);
+}
+
+function weeklyOpenSummary(list, period, dateGetter) {
+  const perWeek = Array(WEEKS_PER_PERIOD).fill(0);
+  for (const item of list) {
+    if (item.status !== "open") continue;
+    const wi = weekIndexForDate(period, dateGetter(item));
+    if (wi === null) continue;
+    perWeek[wi] += (item.originalBalance ?? item.balance);
+  }
+  return { perWeek, total: sum(perWeek) };
+}
+
+function closedDuringPeriod(list, period, dateGetter) {
+  const items = list.filter((item) => item.status === "paid" && weekIndexForDateStrict(period, dateGetter(item)) !== null);
+  return { items, total: sum(items.map((r) => r.originalBalance ?? r.balance)) };
+}
+
+function homeSummaryHoverHTML(bd, label) {
+  const rows = bd.items
+    .slice()
+    .sort((a, b) => (b.originalBalance ?? b.balance) - (a.originalBalance ?? a.balance))
+    .map((r) => `<div class="bd-row paid"><span class="bd-name">✓ ${escapeHtml(r.customer || r.vendor)}<span class="bd-inv">${escapeHtml(r.docNumber || "")}${r.cfDate ? ` · ${fmtDate(r.cfDate)}` : ""}</span></span><span class="bd-amt">${fmtMoney(r.originalBalance ?? r.balance)}</span></div>`)
+    .join("");
+  return `
+    <div class="bd-header">${escapeHtml(label)}</div>
+    <div class="bd-summary">${fmtMoney(bd.total)} total · ${bd.items.length} item${bd.items.length === 1 ? "" : "s"}</div>
+    ${rows || `<div class="bd-empty">Nothing here yet this period</div>`}
+  `;
+}
+
+function renderHomeSummaries(store, period) {
+  const { state } = store;
+  const weeksMeta = periodWeeks(period);
+
+  const arWeekly = weeklyOpenSummary(state.receivables, period, (r) => r.cfDate);
+  const arCollected = closedDuringPeriod(state.receivables, period, (r) => r.cfDate);
+  const apWeekly = weeklyOpenSummary(state.payables, period, (p) => effectivePayableDate(state, period, p));
+  const apPaid = closedDuringPeriod(state.payables, period, (p) => effectivePayableDate(state, period, p));
+
+  const weeklyRow = (perWeek) => weeksMeta.map((w, wi) => `
+    <div class="summary-week-col">
+      <div class="summary-week-label">${fmtDateShort(w.start)}–${fmtDateShort(w.end)}</div>
+      <div class="summary-week-amt">${fmtMoney(perWeek[wi])}</div>
+    </div>
+  `).join("");
+
+  const panel = (opts) => `
+    <div class="panel vault-summary-panel">
+      <div class="summary-head">
+        <h3>${opts.icon} ${opts.title}</h3>
+        <span class="summary-asof">${opts.asOfDate ? `Aged ${opts.kind} as of ${fmtDate(opts.asOfDate)}` : `No ${opts.kind} import yet`}</span>
+      </div>
+      <div class="summary-weekly-row">${weeklyRow(opts.perWeek)}</div>
+      <div class="summary-collected-stat" id="${opts.hoverId}">
+        <div class="label">${opts.collectedLabel} — Hover for Detail</div>
+        <div class="value ${opts.colorClass}">${fmtMoney(opts.collectedTotal)}</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("home-summaries").innerHTML = `
+    ${panel({
+      icon: "📥", title: "Receivables Summary", kind: "AR", asOfDate: state.arAsOfDate,
+      perWeek: arWeekly.perWeek, collectedLabel: "Receivables Collected This Period", collectedTotal: arCollected.total,
+      colorClass: "green", hoverId: "home-ar-collected",
+    })}
+    ${panel({
+      icon: "📤", title: "Payables Summary", kind: "AP", asOfDate: state.apAsOfDate,
+      perWeek: apWeekly.perWeek, collectedLabel: "Payables Paid This Period", collectedTotal: apPaid.total,
+      colorClass: "red", hoverId: "home-ap-paid",
+    })}
+  `;
+
+  attachBreakdownHover(document.getElementById("home-ar-collected"), () => arCollected, () => "Receivables Collected This Period", homeSummaryHoverHTML);
+  attachBreakdownHover(document.getElementById("home-ap-paid"), () => apPaid, () => "Payables Paid This Period", homeSummaryHoverHTML);
 }
 
 export function renderForecast(store) {
@@ -462,10 +541,9 @@ export function renderForecast(store) {
 
       <tr class="loc-row" data-row="locDraw">${labelCell(period, "⟲ LOC Draw / (Repayment)", "locDraw", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.locDraw)}</td>`).join("")}<td>${fmtMoney(calc.totals.locDraw)}</td></tr>
 
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Inter-Account Transfers</td></tr>
-      <tr class="loc-row" data-row="transferToBasinSavings">${labelCell(period, "⇄ Transfer to Basin Savings", "transferToBasinSavings", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.transferToBasinSavings)}</td>`).join("")}<td>${fmtMoney(calc.totals.transferToBasinSavings)}</td></tr>
-      <tr class="loc-row"><td><span class="row-label-text">⇄ Transfer from Basin Savings <span style="font-size:9px;color:var(--text-dim);text-transform:none;">(set on Basin Savings)</span></span></td>${weeks.map((r) => `<td>${fmtMoney(r.transferFromBasinSavings)}</td>`).join("")}<td>${fmtMoney(calc.totals.transferFromBasinSavings)}</td></tr>
-      <tr class="loc-row"><td><span class="row-label-text">⇄ Return from P&amp;C Savings <span style="font-size:9px;color:var(--text-dim);text-transform:none;">(set on P&amp;C Savings)</span></span></td>${weeks.map((r) => `<td>${fmtMoney(r.transferFromPcSavings)}</td>`).join("")}<td>${fmtMoney(calc.totals.transferFromPcSavings)}</td></tr>
+      <tr class="section-label"><td colspan="${weeks.length + 2}">Inter-Account Transfers <span style="font-weight:400; text-transform:none; opacity:0.7;">— negative = out to that account, positive = in from that account</span></td></tr>
+      <tr class="loc-row" data-row="basinSavingsTransfer">${labelCell(period, "⇄ Basin Savings Transfer", "basinSavingsTransfer", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.basinSavingsTransfer)}</td>`).join("")}<td>${fmtMoney(calc.totals.basinSavingsTransfer)}</td></tr>
+      <tr class="loc-row" data-row="pcSavingsTransfer">${labelCell(period, "⇄ P&amp;C Savings Transfer", "pcSavingsTransfer", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.pcSavingsTransfer)}</td>`).join("")}<td>${fmtMoney(calc.totals.pcSavingsTransfer)}</td></tr>
 
       <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
       <tr class="closing" data-row="closing">${labelCell(period, "Closing Cash", "closing", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
@@ -517,13 +595,17 @@ export function renderForecast(store) {
       td.insertAdjacentHTML("beforeend", `<button type="button" class="reset-override-btn" title="This cell is a manual override — click to revert to the computed value">↺</button>`);
     }
 
+    const transferTitles = {
+      basinSavingsTransfer: "Negative = transfer out to Basin Savings. Positive = transfer in from Basin Savings.",
+      pcSavingsTransfer: "Negative = transfer out to P&C Savings. Positive = transfer in from P&C Savings.",
+    };
     editableCell(td, currentVal, (val) => {
       store.mutate((s) => {
         const per = s.periods.find((p) => p.id === period.id);
         const stamped = val === null ? null : { v: val, by: store.initials(), at: new Date().toISOString() };
         writeOverride(per, rowType, cat, wi, stamped);
       });
-    });
+    }, transferTitles[rowType] ? { title: transferTitles[rowType] } : undefined);
 
     td.querySelector(".reset-override-btn")?.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2532,12 +2614,13 @@ async function handleImportFile(store, input, kind) {
   if (!file) return;
   try {
     const isBinaryWorkbook = /\.xlsx?$/i.test(file.name);
-    const parsed = isBinaryWorkbook
+    const { records: parsed, asOfDate } = isBinaryWorkbook
       ? parseAgingWorkbook(await file.arrayBuffer(), kind)
       : parseAgingReport(await file.text(), kind);
     if (!parsed.length) { toast("No open invoices found in that file", "error"); return; }
     store.mutate((s) => {
       const { added, updated, paidOff } = mergeAgingImport(s, kind, parsed);
+      if (asOfDate) { if (kind === "AR") s.arAsOfDate = asOfDate; else s.apAsOfDate = asOfDate; }
       toast(`Imported ${kind}: ${added} new, ${updated} updated, ${paidOff} marked paid`, "success", 5000);
     });
   } catch (err) {
