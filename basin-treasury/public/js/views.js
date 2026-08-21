@@ -432,7 +432,7 @@ function renderHomeSummaries(store, period) {
 
   const pcGroupHtml = `
     <div class="panel balance-group-panel balance-group-pc" style="grid-area:pc;">
-      ${groupHeader("🏗️", "P&amp;C Group", "dot-cyan")}
+      ${groupHeader("🏗️", "P&C Group", "dot-cyan")}
       ${groupTable(acctRow("pc-checking", "P&C Checking", false) + acctRow("pc-savings", "P&C Savings", false) + totalRow("P&C Total", ["pc-checking", "pc-savings"]))}
     </div>`;
 
@@ -532,7 +532,7 @@ export function renderForecast(store) {
 
       <tr class="section-label"><td colspan="${weeks.length + 2}">Inter-Account Transfers <span style="font-weight:400; text-transform:none; opacity:0.7;">— negative = out to that account, positive = in from that account</span></td></tr>
       <tr class="loc-row" data-row="basinSavingsTransfer">${labelCell(period, "⇄ Basin Savings Transfer", "basinSavingsTransfer", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.basinSavingsTransfer)}</td>`).join("")}<td>${fmtMoney(calc.totals.basinSavingsTransfer)}</td></tr>
-      <tr class="loc-row" data-row="pcSavingsTransfer">${labelCell(period, "⇄ P&amp;C Savings Transfer", "pcSavingsTransfer", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.pcSavingsTransfer)}</td>`).join("")}<td>${fmtMoney(calc.totals.pcSavingsTransfer)}</td></tr>
+      <tr class="loc-row" data-row="pcSavingsTransfer">${labelCell(period, "⇄ P&C Savings Transfer", "pcSavingsTransfer", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.pcSavingsTransfer)}</td>`).join("")}<td>${fmtMoney(calc.totals.pcSavingsTransfer)}</td></tr>
 
       <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
       <tr class="closing" data-row="closing">${labelCell(period, "Closing Cash", "closing", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>

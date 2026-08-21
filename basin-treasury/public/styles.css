@@ -658,6 +658,7 @@ table.data-table tbody tr:hover td.name::before{
 }
 table.data-table tbody tr.paid td{ opacity:0.42; }
 table.data-table td.num{ text-align:right; font-family:var(--font-mono); color:var(--text-hi); }
+table.data-table th.num{ text-align:right; }
 table.data-table td.name{ color:var(--text-hi); font-weight:500; }
 .table-scroll{ border:1px solid var(--line); border-radius:var(--radius-md); }
 
