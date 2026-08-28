@@ -474,8 +474,7 @@ export function computeForecast(state, period) {
     const fixedRows = {};
     let fixedTotal = 0;
     for (const cat of fixedCategories) {
-      const raw = readOv(ov.fixedGroup?.[cat]?.[wi]);
-      const val = raw === undefined || raw === null || raw === "" ? -scheduledFixed[cat][wi] : raw;
+      const val = -scheduledFixed[cat][wi]; // always computed from Fixed Payments — not manually overridable
       fixedRows[cat] = val;
       fixedTotal += val;
     }

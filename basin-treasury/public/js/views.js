@@ -520,7 +520,7 @@ export function renderForecast(store) {
 
       <tr class="section-label sec-outflow-fixed"><td colspan="${weeks.length + 2}">Cash Outflow — Fixed / Scheduled</td></tr>
       ${calc.fixedCategories.map((cat) => `
-        <tr class="fixed-row" data-row="fixed" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "fixed", cat, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.fixedRows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.fixedRows[cat])}</td></tr>
+        <tr class="fixed-row" data-row="fixed" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "fixed", cat, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from Fixed Payments — not manually editable">${fmtMoney(r.fixedRows[cat])}</td>`).join("")}<td title="Computed from Fixed Payments — not manually editable">${fmtMoney(calc.totals.fixedRows[cat])}</td></tr>
       `).join("")}
       <tr class="fixed-row ap-row" data-row="apPayables">${labelCell(period, "◆ Weekly AP Payables", "apPayables", null, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from payables' CF dates — not manually editable">${fmtMoney(r.apPayables)}</td>`).join("")}<td title="Computed from payables' CF dates — not manually editable">${fmtMoney(calc.totals.apPayables)}</td></tr>
 

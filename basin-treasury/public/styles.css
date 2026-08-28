@@ -876,7 +876,7 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   grid-template-areas:
     "basin-checking basin-savings eb-savings"
     "pc-checking    pc-savings    eb-savings";
-  gap:16px;
+  gap:18px;
 }
 @media (max-width: 900px){
   .home-account-layout{
@@ -889,41 +889,90 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 }
 
 .account-card{
-  cursor:pointer; margin-bottom:0; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
-  display:flex; flex-direction:column;
+  cursor:pointer; margin-bottom:0; padding:20px 22px 18px; transition:transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, border-color .22s ease;
+  display:flex; flex-direction:column; position:relative; overflow:hidden;
+  background:
+    linear-gradient(115deg, rgba(255,255,255,0.035) 0%, transparent 30%),
+    linear-gradient(165deg, var(--bg-raised) 0%, var(--bg-panel) 65%, var(--bg-deep) 130%);
+  border:1px solid var(--line-bright);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.06) inset,
+    0 -1px 0 rgba(0,0,0,0.5) inset,
+    0 16px 30px -20px rgba(0,0,0,0.85);
 }
-.account-card:hover{ transform:translateY(-3px); border-color:var(--brass); box-shadow:0 18px 34px -18px rgba(0,0,0,0.8), 0 0 0 1px rgba(200,163,90,0.25); }
+.account-card:hover{
+  transform:translateY(-4px);
+  border-color:var(--brass);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.08) inset, 0 -1px 0 rgba(0,0,0,0.5) inset,
+    0 22px 40px -18px rgba(0,0,0,0.9), 0 0 0 1px rgba(200,163,90,0.3);
+}
+/* diagonal light sweep on hover — like a scan pass over polished metal */
+.account-card::after{
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.06) 48%, transparent 56%);
+  background-size:250% 250%; background-position:130% 0%;
+  transition:background-position .7s ease;
+}
+.account-card:hover::after{ background-position:-30% 0%; }
+
 .account-card.main-account{
   border-color:var(--brass); border-width:2px;
-  background:linear-gradient(165deg, rgba(200,163,90,0.08) 0%, var(--bg-panel) 60%);
-  box-shadow:0 0 32px -10px rgba(200,163,90,0.35);
-}
-.main-account-badge{
-  font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.08em;
-  color:#171106; background:var(--brass-bright); display:inline-block;
-  padding:4px 12px; border-radius:20px; margin-bottom:12px; align-self:flex-start;
-}
-.account-card-name{ font-family:'Oswald', var(--font-display); font-size:18px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-hi); margin-bottom:12px; }
-.account-card-figures{ display:grid; grid-template-columns:1fr; gap:7px; margin-bottom:12px; flex:1; }
-.account-card-figures > div{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-.account-card-figures .label{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim); }
-.account-card-figures .value{ font-family:var(--font-mono); font-size:15px; font-weight:700; color:var(--text-hi); }
-.account-card-figures .value.green{ color:var(--green); }
-.account-card-figures .value.red{ color:var(--red); }
-.account-card-figures .value.brass{ color:var(--brass-bright); }
-.account-card-cta{
-  font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--brass);
-  border-top:1px solid var(--line); padding-top:10px; margin-top:auto;
+  background:
+    linear-gradient(115deg, rgba(255,255,255,0.05) 0%, transparent 32%),
+    linear-gradient(165deg, rgba(200,163,90,0.12) 0%, var(--bg-panel) 55%, var(--bg-deep) 130%);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.1) inset, 0 -1px 0 rgba(0,0,0,0.55) inset,
+    0 0 36px -8px rgba(200,163,90,0.4);
 }
 
+.main-account-badge{
+  position:relative;
+  font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.1em;
+  color:#171106; background:linear-gradient(135deg, #f0dfae, var(--brass-bright) 45%, #b8933f);
+  display:inline-flex; align-items:center; gap:6px;
+  padding:5px 13px; border-radius:20px; margin-bottom:14px; align-self:flex-start;
+  box-shadow:0 2px 8px -2px rgba(0,0,0,0.6), 0 0 16px -4px rgba(200,163,90,0.7), 0 1px 0 rgba(255,255,255,0.4) inset;
+  overflow:hidden;
+}
+.main-account-badge::after{
+  content:""; position:absolute; inset:0;
+  background:linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.55) 32%, transparent 44%);
+  animation:badge-shimmer 3.2s ease-in-out infinite;
+}
+@keyframes badge-shimmer{ 0%,60%,100%{ transform:translateX(-120%); } 80%{ transform:translateX(120%); } }
+
+.account-card-name{
+  font-family:'Oswald', var(--font-display); font-size:18px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-hi);
+  margin-bottom:14px; padding-bottom:12px; position:relative;
+  border-bottom:1px solid var(--line);
+}
+.account-card-name::after{
+  content:""; position:absolute; left:0; bottom:-1px; width:34px; height:2px;
+  background:var(--brass-bright); box-shadow:0 0 8px var(--brass-bright);
+}
+.account-card-figures{ display:grid; grid-template-columns:1fr; gap:9px; margin-bottom:12px; flex:1; }
+.account-card-figures > div{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+.account-card-figures .label{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); }
+.account-card-figures .value{ font-family:var(--font-mono); font-size:16px; font-weight:700; color:var(--text-hi); text-shadow:0 0 14px rgba(255,255,255,0.08); }
+.account-card-figures .value.green{ color:var(--green); text-shadow:0 0 16px rgba(79,214,148,0.35); }
+.account-card-figures .value.red{ color:var(--red); text-shadow:0 0 16px rgba(239,111,92,0.3); }
+.account-card-figures .value.brass{ color:var(--brass-bright); text-shadow:0 0 18px rgba(230,195,126,0.4); }
+.account-card-cta{
+  font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--brass);
+  border-top:1px solid var(--line); padding-top:11px; margin-top:auto;
+  display:flex; align-items:center; justify-content:space-between;
+}
+.account-card:hover .account-card-cta{ color:var(--brass-bright); }
+
 /* Basin Checking keeps its "main" prominence but is no longer full-width */
-.layout-basin-checking .account-card-name{ font-size:22px; }
-.layout-basin-checking .account-card-figures .value{ font-size:18px; }
+.layout-basin-checking .account-card-name{ font-size:23px; }
+.layout-basin-checking .account-card-figures .value{ font-size:19px; }
 
 /* EB Savings — off to the side, deliberately smaller/quieter */
 .layout-eb-savings{ padding:16px 18px; }
-.layout-eb-savings .account-card-name{ font-size:14px; margin-bottom:10px; }
-.layout-eb-savings .account-card-figures{ gap:9px; }
+.layout-eb-savings .account-card-name{ font-size:14px; margin-bottom:10px; padding-bottom:9px; }
+.layout-eb-savings .account-card-figures{ gap:10px; }
 .layout-eb-savings .account-card-figures .label{ font-size:9px; }
 .layout-eb-savings .account-card-figures .value{ font-size:13px; }
 .layout-eb-savings .account-card-cta{ font-size:10px; padding-top:8px; }
@@ -933,24 +982,32 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 #view-home{
   position:relative;
   background:
-    radial-gradient(ellipse 900px 500px at 85% -8%, rgba(200,163,90,0.10), transparent 60%),
-    radial-gradient(ellipse 700px 400px at 10% 105%, rgba(147,164,245,0.06), transparent 60%);
+    radial-gradient(ellipse 1000px 550px at 85% -10%, rgba(200,163,90,0.13), transparent 60%),
+    radial-gradient(ellipse 800px 450px at 8% 108%, rgba(147,164,245,0.08), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 50% 40%, rgba(122,217,236,0.03), transparent 65%),
+    linear-gradient(180deg, var(--bg-deep) 0%, #060a10 100%);
   border-radius:var(--radius-lg);
   overflow:hidden;
   padding-bottom:8px;
 }
 .vault-bg-layer{ position:absolute; inset:0; pointer-events:none; z-index:0; overflow:hidden; }
+.vault-bg-layer::after{
+  /* faint diagonal brushed-steel texture */
+  content:""; position:absolute; inset:0;
+  background:repeating-linear-gradient(115deg, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 5px);
+  opacity:0.5;
+}
 
 .vault-door-decor{
   position:absolute; top:-320px; right:-360px; width:1100px; height:1100px;
-  opacity:0.5; animation:vault-door-spin 240s linear infinite;
-  filter:drop-shadow(0 0 40px rgba(200,163,90,0.08));
+  opacity:0.55; animation:vault-door-spin 240s linear infinite;
+  filter:drop-shadow(0 0 50px rgba(200,163,90,0.1));
 }
 @keyframes vault-door-spin{ from{ transform:rotate(0deg); } to{ transform:rotate(360deg); } }
 
 .vault-scanline{
   position:absolute; left:0; right:0; height:140px; top:-140px;
-  background:linear-gradient(180deg, transparent, rgba(122,217,236,0.05) 45%, rgba(122,217,236,0.09) 50%, rgba(122,217,236,0.05) 55%, transparent);
+  background:linear-gradient(180deg, transparent, rgba(122,217,236,0.06) 45%, rgba(122,217,236,0.11) 50%, rgba(122,217,236,0.06) 55%, transparent);
   animation:vault-scan 9s ease-in-out infinite;
   mix-blend-mode:screen;
 }
@@ -964,37 +1021,41 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 
 .vault-light-beam{
   position:absolute; top:-200px; left:50%; width:900px; height:700px; transform:translateX(-50%);
-  background:radial-gradient(ellipse at center, rgba(200,163,90,0.14), transparent 65%);
+  background:radial-gradient(ellipse at center, rgba(200,163,90,0.16), transparent 65%);
   animation:vault-pulse 7s ease-in-out infinite;
 }
 @keyframes vault-pulse{ 0%,100%{ opacity:0.55; } 50%{ opacity:1; } }
 
 #view-home > .page-head, #view-home > #home-accounts, #view-home > #home-balances{ position:relative; z-index:1; }
 
-/* rivets on account cards, reinforcing the "vault plating" feel */
+#view-home .eyebrow{ display:flex; align-items:center; gap:7px; }
+#view-home .eyebrow::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); animation:vault-pulse 2.4s ease-in-out infinite; }
+
+/* corner rivet + hover sweep on account cards — overrides the base .panel
+   pseudo-elements intentionally, giving these cards their own distinct plate look */
 .account-card{ position:relative; }
-.account-card::before, .account-card::after{
-  content:""; position:absolute; width:6px; height:6px; border-radius:50%;
-  background:radial-gradient(circle at 35% 35%, #e8d9b0, #8a6f38 70%); opacity:0.6;
-  box-shadow:0 0 4px rgba(0,0,0,0.6) inset;
+.account-card::before{
+  content:""; position:absolute; top:11px; left:11px; width:5px; height:5px; border-radius:50%;
+  background:radial-gradient(circle at 35% 35%, #f0e3ba, #8a6f38 75%); opacity:0.65;
+  box-shadow:0 0 3px rgba(0,0,0,0.7) inset;
+  pointer-events:none;
 }
-.account-card::before{ top:10px; left:10px; }
-.account-card::after{ top:10px; right:10px; }
 .account-card.main-account{ animation:vault-main-glow 4.5s ease-in-out infinite; }
 @keyframes vault-main-glow{
-  0%,100%{ box-shadow:0 0 32px -10px rgba(200,163,90,0.35); }
-  50%{ box-shadow:0 0 46px -6px rgba(200,163,90,0.55); }
+  0%,100%{ box-shadow:0 1px 0 rgba(255,255,255,0.1) inset, 0 -1px 0 rgba(0,0,0,0.55) inset, 0 0 32px -8px rgba(200,163,90,0.4); }
+  50%{ box-shadow:0 1px 0 rgba(255,255,255,0.14) inset, 0 -1px 0 rgba(0,0,0,0.55) inset, 0 0 48px -6px rgba(200,163,90,0.62); }
 }
 
 /* ---------------- Weekly account balances — 3 distinct grouped panels ---------------- */
 
 .balance-section-eyebrow{
-  font-family:var(--font-mono); font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.1em;
-  color:var(--brass); margin:28px 0 12px; padding-left:14px; position:relative;
+  font-family:var(--font-mono); font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.12em;
+  color:var(--brass); margin:30px 0 14px; padding-left:16px; position:relative;
 }
 .balance-section-eyebrow::before{
-  content:""; position:absolute; left:0; top:2px; bottom:2px; width:3px; border-radius:2px;
+  content:""; position:absolute; left:0; top:1px; bottom:1px; width:3px; border-radius:2px;
   background:linear-gradient(180deg, var(--brass-bright), transparent);
+  box-shadow:0 0 8px var(--brass-bright);
 }
 
 .home-balance-layout{
@@ -1004,53 +1065,85 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   grid-template-areas:
     "basin basin eb"
     "pc    pc    eb";
-  gap:16px;
+  gap:18px;
 }
 @media (max-width: 900px){
   .home-balance-layout{ grid-template-columns:1fr; grid-template-areas:"basin" "pc" "eb"; }
 }
 
 .balance-group-panel{
-  position:relative; overflow:hidden; padding-top:20px;
-  transition:transform .18s ease, box-shadow .18s ease;
+  position:relative; overflow:hidden; padding-top:0;
+  transition:transform .2s ease, box-shadow .2s ease;
+  background:
+    linear-gradient(115deg, rgba(255,255,255,0.03) 0%, transparent 30%),
+    linear-gradient(165deg, var(--bg-raised) 0%, var(--bg-panel) 60%, var(--bg-deep) 140%);
+  box-shadow:0 1px 0 rgba(255,255,255,0.05) inset, 0 -1px 0 rgba(0,0,0,0.5) inset, 0 16px 30px -22px rgba(0,0,0,0.85);
 }
-.balance-group-panel::before{
-  content:""; position:absolute; top:0; left:0; right:0; height:3px;
-}
-.balance-group-basin::before{ background:linear-gradient(90deg, var(--brass), var(--brass-bright), var(--brass)); }
-.balance-group-pc::before{ background:linear-gradient(90deg, var(--cyan), #9fe6f5, var(--cyan)); }
-.balance-group-eb::before{ background:linear-gradient(90deg, var(--violet), #d8c9ff, var(--violet)); }
+.balance-group-panel:hover{ transform:translateY(-2px); }
 
-.balance-group-header{
-  display:flex; align-items:center; gap:9px; margin-bottom:14px;
-  font-family:'Oswald', var(--font-display); font-size:15px; font-weight:700;
-  text-transform:uppercase; letter-spacing:0.04em; color:var(--text-hi);
+/* glowing top accent bar, per group */
+.balance-group-panel::before{
+  content:""; position:absolute; top:0; left:0; right:0; height:3px; z-index:2;
 }
-.balance-group-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; box-shadow:0 0 8px currentColor; }
+.balance-group-basin::before{ background:linear-gradient(90deg, transparent, var(--brass-bright), var(--brass), var(--brass-bright), transparent); box-shadow:0 0 12px rgba(200,163,90,0.7); }
+.balance-group-pc::before{ background:linear-gradient(90deg, transparent, #9fe6f5, var(--cyan), #9fe6f5, transparent); box-shadow:0 0 12px rgba(122,217,236,0.6); }
+.balance-group-eb::before{ background:linear-gradient(90deg, transparent, #d8c9ff, var(--violet), #d8c9ff, transparent); box-shadow:0 0 12px rgba(195,174,252,0.6); }
+
+/* header rendered as an embossed "access panel" plaque */
+.balance-group-header{
+  display:flex; align-items:center; gap:10px;
+  font-family:'Oswald', var(--font-display); font-size:14px; font-weight:700;
+  text-transform:uppercase; letter-spacing:0.06em; color:var(--text-hi);
+  padding:14px 20px; margin:0;
+  background:linear-gradient(180deg, rgba(255,255,255,0.03), transparent);
+  border-bottom:1px solid var(--line-bright);
+}
+.balance-group-dot{
+  width:8px; height:8px; border-radius:50%; flex-shrink:0;
+  box-shadow:0 0 10px currentColor, 0 0 2px currentColor;
+  animation:led-pulse 2.6s ease-in-out infinite;
+}
+@keyframes led-pulse{ 0%,100%{ opacity:0.65; transform:scale(0.9); } 50%{ opacity:1; transform:scale(1.05); } }
 .dot-brass{ background:var(--brass-bright); color:var(--brass-bright); }
 .dot-cyan{ background:var(--cyan); color:var(--cyan); }
 .dot-violet{ background:var(--violet); color:var(--violet); }
 
-.balance-group-basin{ background:linear-gradient(165deg, rgba(200,163,90,0.07) 0%, var(--bg-panel) 55%); border-color:rgba(200,163,90,0.35); }
-.balance-group-pc{ background:linear-gradient(165deg, rgba(122,217,236,0.06) 0%, var(--bg-panel) 55%); border-color:rgba(122,217,236,0.3); }
-.balance-group-eb{ background:linear-gradient(165deg, rgba(195,174,252,0.07) 0%, var(--bg-panel) 55%); border-color:rgba(195,174,252,0.3); }
+.balance-group-basin{ border-color:rgba(200,163,90,0.4); }
+.balance-group-pc{ border-color:rgba(122,217,236,0.35); }
+.balance-group-eb{ border-color:rgba(195,174,252,0.35); }
+
+.balance-group-panel .home-balance-table{ margin:16px 20px 20px; width:calc(100% - 40px); }
 
 .home-balance-table{ font-size:12.5px; }
+.home-balance-table thead th{ background:rgba(0,0,0,0.2); }
 .home-balance-table th{ white-space:nowrap; }
 .home-balance-table td.num{ font-family:var(--font-mono); text-align:right; white-space:nowrap; }
-.home-balance-table tr.home-balance-main td{ color:var(--brass-bright); font-weight:700; background:rgba(200,163,90,0.08); }
+.home-balance-table tbody tr{ transition:background .15s; }
+.home-balance-table tbody tr:hover td{ background:rgba(255,255,255,0.03); }
+.home-balance-table tr.home-balance-main td{
+  color:var(--brass-bright); font-weight:700;
+  background:linear-gradient(90deg, rgba(200,163,90,0.12), rgba(200,163,90,0.03));
+  text-shadow:0 0 10px rgba(230,195,126,0.3);
+}
 .home-balance-table tr.home-balance-total td{
-  font-weight:700; color:var(--text-hi); background:rgba(255,255,255,0.04);
+  font-weight:700; color:var(--text-hi); background:rgba(255,255,255,0.05);
   border-top:2px solid var(--line-bright); border-bottom:2px solid var(--line-bright);
+  box-shadow:0 0 16px -6px rgba(255,255,255,0.15) inset;
 }
 
 /* EB Savings — narrow side panel, week-by-week vertical list instead of a cramped table */
-.balance-eb-weekly-list{ display:flex; flex-direction:column; gap:2px; }
+.balance-eb-weekly-list{ display:flex; flex-direction:column; gap:1px; margin:14px 18px 18px; }
 .balance-eb-week{
   display:flex; align-items:baseline; justify-content:space-between; gap:8px;
-  padding:9px 4px; border-bottom:1px solid var(--line);
+  padding:9px 8px; border-bottom:1px solid var(--line); border-left:2px solid transparent;
+  transition:border-color .15s, background .15s;
 }
-.balance-eb-week:last-child{ border-bottom:none; font-weight:700; }
-.balance-eb-week:last-child .balance-eb-week-value{ color:var(--violet); font-size:15px; }
+.balance-eb-week:hover{ border-left-color:var(--violet); background:rgba(195,174,252,0.04); }
+.balance-eb-week:last-child{
+  border-bottom:none; font-weight:700; border-left-color:var(--violet);
+  background:linear-gradient(90deg, rgba(195,174,252,0.1), transparent);
+  box-shadow:0 0 16px -8px rgba(195,174,252,0.5) inset;
+}
+.balance-eb-week:last-child .balance-eb-week-value{ color:var(--violet); font-size:15px; text-shadow:0 0 12px rgba(195,174,252,0.5); }
 .balance-eb-week-label{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); }
 .balance-eb-week-value{ font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--text-hi); }
