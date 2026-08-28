@@ -312,7 +312,14 @@ main{ flex:1; padding:24px 30px 60px; max-width:2100px; width:97%; margin:0 auto
 .sticky-toolbar{ position:sticky; z-index:9; background:var(--bg-deep); padding-top:6px; margin-top:-6px; }
 .view{ display:none; animation:fadeIn .18s ease; }
 .view.active{ display:block; }
-#view-settings{ position:relative; }
+#view-settings{
+  position:relative;
+  background:
+    radial-gradient(ellipse 1000px 550px at 85% -10%, rgba(200,163,90,0.09), transparent 60%),
+    radial-gradient(ellipse 800px 450px at 8% 105%, rgba(147,164,245,0.06), transparent 60%);
+  border-radius:var(--radius-lg);
+  padding-bottom:8px;
+}
 .settings-blueprint-bg{
   position:absolute; top:-24px; left:-30px; right:-30px; bottom:-40px;
   z-index:0; opacity:0.22; pointer-events:none; overflow:hidden; border-radius:var(--radius-lg);
@@ -977,7 +984,30 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .layout-eb-savings .account-card-figures .value{ font-size:13px; }
 .layout-eb-savings .account-card-cta{ font-size:10px; padding-top:8px; }
 
-/* ===================== VAULT INTERIOR — Home page ===================== */
+/* ===================== VAULT INTERIOR — applied to every tab for a cohesive feel ===================== */
+
+#view-forecast, #view-receivables, #view-unbilled, #view-payables, #view-fixed{
+  position:relative;
+  background:
+    radial-gradient(ellipse 1000px 550px at 85% -10%, rgba(200,163,90,0.11), transparent 60%),
+    radial-gradient(ellipse 800px 450px at 8% 30%, rgba(147,164,245,0.06), transparent 60%),
+    radial-gradient(ellipse 600px 500px at 50% 60%, rgba(122,217,236,0.025), transparent 65%),
+    linear-gradient(180deg, var(--bg-deep) 0%, #060a10 100%);
+  border-radius:var(--radius-lg);
+  padding-bottom:8px;
+}
+/* .vault-bg-layer clips itself (see rule below) — deliberately NOT setting
+   overflow:hidden on these page sections, since several rely on the page
+   itself being the only scroll ancestor for their tables' sticky headers.
+   The general-sibling selector lifts every real content element above the
+   background layer regardless of each page's differing internal structure. */
+.vault-bg-layer ~ *{ position:relative; z-index:1; }
+/* .frozen-head / .sticky-toolbar MUST stay position:sticky — these overrides
+   win via specificity regardless of file order, so the general rule above
+   can never silently break a table's sticky header. */
+.vault-bg-layer ~ .frozen-head{ position:sticky; z-index:9; }
+.vault-bg-layer ~ .sticky-toolbar{ position:sticky; z-index:9; }
+.vault-bg-layer ~ * .sticky-toolbar{ position:sticky; z-index:9; }
 
 #view-home{
   position:relative;
@@ -999,9 +1029,9 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 }
 
 .vault-door-decor{
-  position:absolute; top:-320px; right:-360px; width:1100px; height:1100px;
-  opacity:0.55; animation:vault-door-spin 240s linear infinite;
-  filter:drop-shadow(0 0 50px rgba(200,163,90,0.1));
+  position:absolute; top:-280px; right:-300px; width:1100px; height:1100px;
+  opacity:0.85; animation:vault-door-spin 240s linear infinite;
+  filter:drop-shadow(0 0 60px rgba(230,195,126,0.25));
 }
 @keyframes vault-door-spin{ from{ transform:rotate(0deg); } to{ transform:rotate(360deg); } }
 

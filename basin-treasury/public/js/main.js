@@ -7,6 +7,11 @@ document.getElementById("login-contours").innerHTML = contourSVG(3, { w: 900, h:
 document.getElementById("topbar-contours").innerHTML = contourSVG(7, { w: 1600, h: 100 });
 document.getElementById("settings-blueprint").innerHTML = masterPlanSVG();
 document.getElementById("vault-door-decor").innerHTML = vaultDoorSVG(1100);
+document.getElementById("vault-door-decor-forecast").innerHTML = vaultDoorSVG(1100);
+document.getElementById("vault-door-decor-ar").innerHTML = vaultDoorSVG(1100);
+document.getElementById("vault-door-decor-ub").innerHTML = vaultDoorSVG(1100);
+document.getElementById("vault-door-decor-ap").innerHTML = vaultDoorSVG(1100);
+document.getElementById("vault-door-decor-fixed").innerHTML = vaultDoorSVG(1100);
 
 const RENDERERS = {
   home: renderHome,
