@@ -281,8 +281,9 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
 
   // Anything still open that was sitting in one of the now-dropped weeks is
   // presumed handled by now — close it out so it stops counting toward the
-  // new forecast (and stops inflating Total AR/AP), but leave it on its tab
-  // with its CF date untouched, so there's still a record of it.
+  // new forecast, but leave it on its tab with its CF date untouched (and its
+  // balance showing the original invoice amount, not zeroed), so there's
+  // still a clear record of it.
   const now = new Date().toISOString();
   let rolledOffReceivables = 0, rolledOffAmount = 0;
   for (const r of state.receivables) {
@@ -292,7 +293,6 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
     if (r.originalBalance === undefined) r.originalBalance = r.balance;
     rolledOffAmount += r.balance;
     r.status = "paid";
-    r.balance = 0;
     r.updatedAt = now;
     rolledOffReceivables++;
   }
@@ -454,13 +454,15 @@ export function interCompanyTransfersForAccount(state, period, accountId) {
 // (for a payable that's pay-when-paid against revenue that isn't billed yet).
 export function effectivePayableDate(state, period, payable) {
   if (!payable.payWhenPaid || !payable.linkedReceivableId) return payable.cfDate;
+  if (payable.payDateOverride) return payable.payDateOverride; // manual override — still linked, just not auto-computed
   const list = payable.linkedReceivableKind === "unbilled" ? (state.unbilledReceivables || []) : state.receivables;
   const rec = list.find((r) => r.id === payable.linkedReceivableId);
   if (!rec || !rec.cfDate) return null;
   const weeks = periodWeeks(period);
-  const recDate = parseISO(rec.cfDate);
-  const next = weeks.find((w) => parseISO(w.payRun) > recDate);
-  return next ? next.payRun : null;
+  const recWeekIndex = weekIndexForDate(period, rec.cfDate);
+  if (recWeekIndex === null) return null; // the receivable's date falls outside this period's window
+  const nextWeek = weeks[recWeekIndex + 1]; // the pay run in the week FOLLOWING collection, not just any later pay run
+  return nextWeek ? nextWeek.payRun : null;
 }
 
 export function scheduleLabel(item) {
@@ -868,7 +870,7 @@ export function mergeAgingImport(state, kind, parsed) {
       if (!seen.has(key)) {
         if (x.originalBalance === undefined) x.originalBalance = x.balance;
         x.status = "paid";
-        x.balance = 0;
+        if (kind === "AP") x.balance = 0; // AR keeps showing the original invoice amount once paid
         x.updatedAt = new Date().toISOString();
         paidOff++;
       }

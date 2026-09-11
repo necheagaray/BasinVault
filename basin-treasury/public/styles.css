@@ -704,8 +704,18 @@ tr.uncertain-row td{ background:rgba(224,168,63,0.035); }
 .pwp-toggle input{ accent-color:var(--cyan); width:12px; height:12px; }
 .pwp-result{
   font-family:var(--font-mono); font-size:10.5px; color:var(--cyan); margin-top:4px;
+  display:flex; align-items:center; gap:5px;
 }
 .pwp-result.unset{ color:var(--red); }
+.pwp-date-text{ cursor:pointer; border-bottom:1px dashed rgba(122,217,236,0.4); }
+.pwp-date-text:hover{ color:var(--brass-bright); border-bottom-color:var(--brass-bright); }
+.pwp-result.is-override{ color:var(--brass-bright); }
+.pwp-result.is-override .pwp-date-text{ border-bottom-color:var(--brass-bright); }
+.pwp-reset{
+  background:none; border:none; padding:0; color:var(--brass); cursor:pointer; font-size:10.5px; line-height:1;
+  opacity:0.75; transition:opacity .15s, transform .15s;
+}
+.pwp-reset:hover{ opacity:1; transform:rotate(-90deg); }
 
 /* side panel layout (payables) */
 .split{ display:grid; grid-template-columns:1fr 300px; gap:16px; align-items:start; }

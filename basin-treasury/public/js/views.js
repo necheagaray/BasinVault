@@ -1056,9 +1056,9 @@ function openPaymentHistoryModal(store, id) {
       host.querySelector("#hist-close").onclick = closeModal;
       const recompute = (item) => {
         const paid = item.payments.reduce((a, p) => a + p.amount, 0);
-        item.balance = Math.max(0, Math.round(((item.originalBalance ?? item.balance) - paid) * 100) / 100);
-        if (item.balance > 0) item.status = "open";
-        else if (item.balance <= 0) { item.balance = 0; item.status = "paid"; }
+        const remaining = Math.max(0, Math.round(((item.originalBalance ?? item.balance) - paid) * 100) / 100);
+        if (remaining > 0) { item.balance = remaining; item.status = "open"; }
+        else { item.balance = item.originalBalance ?? item.balance; item.status = "paid"; }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       };
       host.querySelectorAll(".remove-payment").forEach((btn) => {
@@ -1143,7 +1143,8 @@ function openRecordPaymentModal(store, id) {
             // full payment (or overpayment) — close this line out, no split needed
             item.payments = item.payments || [];
             item.payments.push({ date, amount: amt });
-            item.balance = 0;
+            if (item.originalBalance === undefined) item.originalBalance = item.balance;
+            item.balance = item.originalBalance; // show the original invoice amount, not $0
             item.status = "paid";
             item.lastEditBy = store.initials();
             item.updatedAt = new Date().toISOString();
@@ -1156,7 +1157,7 @@ function openRecordPaymentModal(store, id) {
             delete paidLine.note; // keep any note on the still-open remaining line, not duplicated
             paidLine.id = uid("ar");
             paidLine.docNumber = `${item.docNumber || ""} (Partial Pmt)`.trim();
-            paidLine.balance = 0;
+            paidLine.balance = amt;
             paidLine.originalBalance = amt;
             paidLine.payments = [{ date, amount: amt }];
             paidLine.status = "paid";
@@ -1314,10 +1315,10 @@ function renderARRows(store, period) {
           const paidSoFar = (item.payments || []).reduce((a, p) => a + p.amount, 0);
           item.balance = Math.max(0, Math.round((item.originalBalance - paidSoFar) * 100) / 100);
         } else if (!reopening) {
-          // marking paid — zero the balance (nothing left owed); keep originalBalance
-          // for the CF Forecast and history, same convention as Record Payment
+          // marking paid — show the original invoice amount, not $0, so it's
+          // still clear how much the invoice was for
           if (item.originalBalance === undefined) item.originalBalance = item.balance;
-          item.balance = 0;
+          item.balance = item.originalBalance;
         }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
@@ -1337,9 +1338,15 @@ function renderARRows(store, period) {
           const item = s.receivables.find((x) => x.id === id);
           if (!item || Number.isNaN(val) || val < 0) return;
           const paidSoFar = (item.payments || []).reduce((a, p) => a + p.amount, 0);
-          item.balance = Math.round(val * 100) / 100;
-          item.originalBalance = Math.round((item.balance + paidSoFar) * 100) / 100;
-          if (item.balance <= 0 && item.status === "open") { item.balance = 0; item.status = "paid"; }
+          if (val <= 0 && item.status === "open") {
+            // typing 0 as a shortcut for "mark paid" — keep showing what the invoice was for
+            item.originalBalance = item.originalBalance ?? item.balance;
+            item.balance = item.originalBalance;
+            item.status = "paid";
+          } else {
+            item.balance = Math.round(val * 100) / 100;
+            item.originalBalance = Math.round((item.balance + paidSoFar) * 100) / 100;
+          }
           item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
         });
       };
@@ -1818,7 +1825,10 @@ function renderAPRows(store, period) {
             ${openUnbilled.map((u) => `<option value="unbilled:${u.id}" ${linkedValue === `unbilled:${u.id}` ? "selected" : ""}>${escapeHtml(u.customer)} — ${escapeHtml(u.project || "")} — ${fmtMoney(u.balance)}${u.cfDate ? " · " + fmtDate(u.cfDate) : " · unscheduled"}</option>`).join("")}
           </optgroup>
         </select>
-        <div class="pwp-result ${effDate ? "" : "unset"}">${effDate ? `→ pays ${fmtDate(effDate)}` : "→ not scheduled (receivable unscheduled)"}</div>`
+        <div class="pwp-result ${effDate ? "" : "unset"} ${p.payDateOverride ? "is-override" : ""}">
+          <span class="pwp-date-text" title="Click to manually set this payable's pay date instead">${effDate ? `→ pays ${fmtDate(effDate)}` : "→ not scheduled (receivable unscheduled)"}</span>
+          ${p.payDateOverride ? `<button type="button" class="pwp-reset" title="Reset to auto-scheduled (the pay run the week after the receivable is collected)">↺</button>` : ""}
+        </div>`
       : `<select class="mini-select payrun-select">
           <option value="">— unscheduled —</option>
           ${weeks.map((w) => `<option value="${w.payRun}" ${p.cfDate === w.payRun ? "selected" : ""}>${fmtDate(w.payRun)}</option>`).join("")}
@@ -1868,7 +1878,7 @@ function renderAPRows(store, period) {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
         item.payWhenPaid = e.target.checked;
-        if (!e.target.checked) { item.linkedReceivableId = null; item.linkedReceivableKind = null; }
+        if (!e.target.checked) { item.linkedReceivableId = null; item.linkedReceivableKind = null; item.payDateOverride = null; }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
@@ -1878,6 +1888,33 @@ function renderAPRows(store, period) {
         const item = s.payables.find((x) => x.id === id);
         item.linkedReceivableId = recId || null;
         item.linkedReceivableKind = kind === "unbilled" ? "unbilled" : "ar";
+        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+      });
+    });
+    tr.querySelector(".pwp-date-text")?.addEventListener("click", () => {
+      const item0 = state.payables.find((x) => x.id === id);
+      const cellEffDate = effectivePayableDate(state, period, item0);
+      const input = document.createElement("input");
+      input.type = "date"; input.className = "mini-input";
+      input.value = item0.payDateOverride || cellEffDate || "";
+      const wrap = tr.querySelector(".pwp-result");
+      wrap.innerHTML = ""; wrap.appendChild(input); input.focus();
+      const commit = () => {
+        const val = input.value || null;
+        store.mutate((s) => {
+          const item = s.payables.find((x) => x.id === id);
+          item.payDateOverride = val;
+          item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+        });
+      };
+      input.addEventListener("keydown", (e2) => { if (e2.key === "Enter") input.blur(); });
+      input.addEventListener("blur", commit, { once: true });
+    });
+    tr.querySelector(".pwp-reset")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      store.mutate((s) => {
+        const item = s.payables.find((x) => x.id === id);
+        item.payDateOverride = null;
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
