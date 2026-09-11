@@ -1,5 +1,5 @@
 import * as api from "./api.js";
-import { defaultState, mergeStates, migratePeriod } from "./state.js";
+import { defaultState, mergeStates, migratePeriod, migrateTransfersToStateLevel } from "./state.js";
 import { debounce, toast, contourSVG, masterPlanSVG, vaultDoorSVG } from "./util.js";
 import { renderHome, renderForecast, renderReceivables, renderUnbilled, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
 
@@ -145,8 +145,11 @@ const Store = {
       const snap = await api.fetchSnapshot(key);
       this.state = snap.state;
       if (!this.state.unbilledReceivables) this.state.unbilledReceivables = [];
-      if (!this.state.tombstones) this.state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} };
+      if (!this.state.transfers) this.state.transfers = [];
+      if (!this.state.tombstones) this.state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {} };
+      if (!this.state.tombstones.transfers) this.state.tombstones.transfers = {};
       this.state.periods.forEach((p) => migratePeriod(p));
+      migrateTransfersToStateLevel(this.state);
       await this.pushNow();
       this.render();
       toast(`Restored version ${snap.version}`, "success");
@@ -188,8 +191,11 @@ async function boot() {
     }
     if (!remote.manualOutflowCategories.includes("Other")) remote.manualOutflowCategories.push("Other");
     if (!remote.unbilledReceivables) remote.unbilledReceivables = [];
-    if (!remote.tombstones) remote.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} };
+    if (!remote.transfers) remote.transfers = [];
+    if (!remote.tombstones) remote.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {} };
+    if (!remote.tombstones.transfers) remote.tombstones.transfers = {};
     remote.periods.forEach((p) => migratePeriod(p));
+    migrateTransfersToStateLevel(remote);
     Store.state = remote;
     showApp();
     Store.render();

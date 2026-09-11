@@ -567,6 +567,10 @@ table.data-table tbody tr:hover .cell-pencil{ opacity:0.55; }
 /* persistent collection-progress bar under Receivables Collected */
 td.rc-cell{ padding-bottom:9px; }
 .rc-bar{ height:3px; width:100%; background:rgba(255,255,255,0.08); border-radius:2px; margin-top:6px; overflow:hidden; }
+.ic-account-tag{
+  font-size:9.5px; font-family:var(--font-mono); color:var(--indigo); margin-top:3px;
+  text-transform:uppercase; letter-spacing:0.03em; opacity:0.85;
+}
 .rc-bar-fill{ height:100%; background:var(--green); box-shadow:0 0 6px rgba(79,214,148,0.6); border-radius:2px; transition:width .25s ease; }
 
 /* invoice breakdown popup (computed, distinct from the manual yellow sticky notes) */
@@ -871,6 +875,22 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .fixed-amt-edit{ cursor:pointer; box-shadow:inset 0 -1px 0 0 var(--brass-dim); border-radius:2px; transition:background .15s; }
 .fixed-amt-edit:hover{ background:rgba(200,163,90,0.12); }
 
+.week-amounts-row{ display:flex; flex-wrap:wrap; gap:6px; padding:0 16px 14px; }
+.week-amount-chip{
+  display:flex; align-items:center; gap:6px; padding:5px 8px; border-radius:6px;
+  background:var(--bg-deep); border:1px solid var(--line); font-family:var(--font-mono); font-size:11px;
+}
+.week-amount-chip .wac-label{ color:var(--text-dim); font-weight:700; }
+.week-amount-chip .wac-amt{ color:var(--text-hi); cursor:pointer; border-bottom:1px dashed var(--line-bright); }
+.week-amount-chip .wac-amt:hover{ color:var(--brass-bright); }
+.week-amount-chip.is-override{ border-color:var(--brass); background:rgba(200,163,90,0.1); }
+.week-amount-chip.is-override .wac-amt{ color:var(--brass-bright); border-bottom-color:var(--brass); }
+.wac-reset{
+  background:none; border:none; padding:0; color:var(--brass); cursor:pointer; font-size:11px; line-height:1;
+  opacity:0.75; transition:opacity .15s, transform .15s;
+}
+.wac-reset:hover{ opacity:1; transform:rotate(-90deg); }
+
 .memo-cell{
   max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   color:var(--text-dim); font-size:12.5px; cursor:default;
@@ -1160,6 +1180,15 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   border-top:2px solid var(--line-bright); border-bottom:2px solid var(--line-bright);
   box-shadow:0 0 16px -6px rgba(255,255,255,0.15) inset;
 }
+.home-balance-table th.home-balance-opening-col,
+.home-balance-table td.home-balance-opening-col{
+  border-right:2px solid var(--brass-dim);
+}
+.home-balance-table td.home-balance-opening-col{ background:rgba(255,255,255,0.03); }
+.home-balance-table th.home-balance-opening-col{ color:var(--text-dim); font-style:italic; }
+
+.balance-eb-opening{ border-bottom:2px solid var(--brass-dim) !important; margin-bottom:2px; }
+.balance-eb-opening .balance-eb-week-label{ color:var(--text-dim); font-style:italic; }
 
 /* EB Savings — narrow side panel, week-by-week vertical list instead of a cramped table */
 .balance-eb-weekly-list{ display:flex; flex-direction:column; gap:1px; margin:14px 18px 18px; }

@@ -23,17 +23,6 @@ export const ACCOUNTS = [
   { id: "eb-savings", name: "EB Savings", isMain: false },
 ];
 
-// Each transfer link is editable on the "from" side (an outflow there) and
-// mirrored, read-only, as an inflow on the "to" side — one number driving
-// both, so the two accounts can never disagree about a transfer amount.
-// The only remaining simple (one-directional, single-editable-side) transfer
-// link — P&C Checking's own sweep to its savings account. The Basin Checking
-// <-> Basin Savings and Basin Checking <-> P&C Savings relationships are each
-// a single bidirectional signed field instead (see makePeriod's `transfers`).
-export const TRANSFER_LINKS = [
-  { id: "toPcSavings", label: "Transfer to P&C Savings", from: "pc-checking", to: "pc-savings" },
-];
-
 export function accountName(id) {
   return ACCOUNTS.find((a) => a.id === id)?.name || id;
 }
@@ -48,31 +37,56 @@ export function migratePeriod(period) {
   if (!period.pcPayroll) period.pcPayroll = { amount: 0, weeks: [] };
   if (!period.pcK401) period.pcK401 = { amount: 0, weeks: [] };
   if (!period.pcOtherOutflow) period.pcOtherOutflow = {};
-  if (!period.transfers) period.transfers = {};
-
-  // migrate the old separate toBasinSavings/fromBasinSavings and
-  // fromPcSavingsToBasin fields (if present, from before this was
-  // consolidated) into the new single signed fields
-  if (!period.transfers.basinSavingsTransfer) {
-    const out = period.transfers.toBasinSavings || {};
-    const back = period.transfers.fromBasinSavings || {};
-    const merged = {};
-    for (const wi of new Set([...Object.keys(out), ...Object.keys(back)])) {
-      merged[wi] = out[wi] ?? back[wi];
-    }
-    period.transfers.basinSavingsTransfer = merged;
-  }
-  if (!period.transfers.pcSavingsTransfer) {
-    period.transfers.pcSavingsTransfer = period.transfers.fromPcSavingsToBasin || {};
-  }
-  delete period.transfers.toBasinSavings;
-  delete period.transfers.fromBasinSavings;
-  delete period.transfers.fromPcSavingsToBasin;
-
-  for (const link of TRANSFER_LINKS) {
-    if (!period.transfers[link.id]) period.transfers[link.id] = {};
+  if (period.payroll && !period.payroll.weekAmounts) period.payroll.weekAmounts = {};
+  if (period.k401 && !period.k401.weekAmounts) period.k401.weekAmounts = {};
+  if (period.pcPayroll && !period.pcPayroll.weekAmounts) period.pcPayroll.weekAmounts = {};
+  if (period.pcK401 && !period.pcK401.weekAmounts) period.pcK401.weekAmounts = {};
+  if (!period.interest) period.interest = {};
+  for (const acctId of ["basin-savings", "eb-savings", "pc-savings"]) {
+    if (!period.interest[acctId]) period.interest[acctId] = { rate: 0, dayOfMonth: 1, avgBalance: 0 };
   }
   return period;
+}
+
+// One-time migration: the old per-period signed-field transfer system
+// (basinSavingsTransfer / pcSavingsTransfer / toPcSavings, one number per
+// week) gets converted into individual dated state.transfers[] records — the
+// same shape a manually-entered transfer has. Safe to call every boot; it's a
+// no-op once period.transfers has been removed from every period.
+export function migrateTransfersToStateLevel(state) {
+  if (!Array.isArray(state.transfers)) state.transfers = [];
+  for (const period of state.periods) {
+    if (!period.transfers || typeof period.transfers !== "object") continue;
+    const weeks = periodWeeks(period);
+    const migrateField = (fieldKey, fromAccount, toAccount) => {
+      const map = period.transfers[fieldKey];
+      if (!map) return;
+      for (const wiStr of Object.keys(map)) {
+        const wi = Number(wiStr);
+        const week = weeks[wi];
+        const entry = map[wiStr];
+        const amt = entry && typeof entry === "object" ? entry.v : entry;
+        if (!week || !amt) continue;
+        const [from, to] = amt < 0 ? [fromAccount, toAccount] : [toAccount, fromAccount];
+        state.transfers.push({
+          id: uid("tr"), fromAccount: from, toAccount: to, amount: Math.round(Math.abs(amt) * 100) / 100,
+          date: week.payRun, note: "Migrated from a prior version of the app", source: "manual",
+          lastEditBy: (entry && entry.by) || "migration", updatedAt: (entry && entry.at) || new Date().toISOString(),
+        });
+      }
+    };
+    migrateField("basinSavingsTransfer", "basin-checking", "basin-savings");
+    migrateField("pcSavingsTransfer", "basin-checking", "pc-savings");
+    migrateField("toPcSavings", "pc-checking", "pc-savings");
+    delete period.transfers;
+  }
+  for (const fp of state.fixedPayments || []) {
+    if (fp.transfersToAccount && !fp.transferFrom) {
+      fp.transferFrom = "basin-checking";
+      fp.transferTo = fp.transfersToAccount;
+    }
+    delete fp.transfersToAccount;
+  }
 }
 
 export function defaultState() {
@@ -93,9 +107,12 @@ export function defaultState() {
     // Records deletions ({ [listKey]: { [id]: deletedAtISO } }) so that when two
     // people's edits get merged, a deleted item doesn't silently reappear just
     // because the other copy being merged in is older and still has it.
-    tombstones: { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {} },
+    tombstones: { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {} },
     arAsOfDate: null, // "as of" date pulled from the most recent Aged AR import's report header
     apAsOfDate: null,
+    // Manual inter-company transfers — { id, fromAccount, toAccount, amount, date, note, source:'manual', lastEditBy, updatedAt }.
+    // Recurring transfers are set up on a Fixed Payment instead (transferFrom/transferTo fields).
+    transfers: [],
   };
 }
 
@@ -113,8 +130,11 @@ export function makePeriod(id, label, startISO) {
     startDate: startISO,
     openingCash: 0,
     locOpeningBalance: 0,
-    payroll: { amount: 0, weeks: [] }, // weeks = array of week indices (0-4) the run posts on — manually chosen
-    k401: { amount: 0, weeks: [] },
+    // weekAmounts optionally overrides the base amount for a specific week —
+    // e.g. a guy starts or stops between one payroll run and the next. Any
+    // selected week not present in weekAmounts just uses the base amount.
+    payroll: { amount: 0, weeks: [], weekAmounts: {} },
+    k401: { amount: 0, weeks: [], weekAmounts: {} },
     notes: {},
     overrides: {
       receivablesCollected: {},
@@ -127,8 +147,8 @@ export function makePeriod(id, label, startISO) {
 
     // --- P&C Checking ---
     pcOpeningCash: 0,
-    pcPayroll: { amount: 0, weeks: [] },
-    pcK401: { amount: 0, weeks: [] },
+    pcPayroll: { amount: 0, weeks: [], weekAmounts: {} },
+    pcK401: { amount: 0, weeks: [], weekAmounts: {} },
     pcOtherOutflow: {}, // { [weekIndex]: { v, by, at } } — same override shape as everything else
 
     // --- EB Savings / Basin Savings / P&C Savings opening balances ---
@@ -136,15 +156,14 @@ export function makePeriod(id, label, startISO) {
     basinSavingsOpeningCash: 0,
     pcSavingsOpeningCash: 0,
 
-    // --- Inter-account transfers, keyed by TRANSFER_LINKS id ---
-    // { [linkId]: { [weekIndex]: { v, by, at } } }
-    // basinSavingsTransfer and pcSavingsTransfer are each ONE signed field per
-    // week, editable only here on Basin Checking (same convention as LOC Draw):
-    // negative = money leaving Basin Checking into that savings account,
-    // positive = money arriving in Basin Checking from that savings account.
-    // toPcSavings is the separate P&C Checking -> P&C Savings sweep, unrelated
-    // to Basin Checking, and stays editable on P&C Checking's own page.
-    transfers: { basinSavingsTransfer: {}, pcSavingsTransfer: {}, toPcSavings: {} },
+    // Interest on the 3 savings accounts. rate is an ANNUAL rate as a decimal
+    // (2% = 0.02). Posts monthly on dayOfMonth. avgBalance is the average
+    // monthly balance the user enters by hand — interest = avgBalance * (rate/12).
+    interest: {
+      "basin-savings": { rate: 0, dayOfMonth: 1, avgBalance: 0 },
+      "eb-savings": { rate: 0, dayOfMonth: 1, avgBalance: 0 },
+      "pc-savings": { rate: 0, dayOfMonth: 1, avgBalance: 0 },
+    },
   };
 }
 
@@ -214,6 +233,16 @@ function shiftWeeksArray(weeks, n) {
   return (weeks || []).filter((w) => w >= n).map((w) => w - n);
 }
 
+function shiftWeekAmounts(weekAmounts, n) {
+  const out = {};
+  for (const key of Object.keys(weekAmounts || {})) {
+    const wi = Number(key);
+    if (Number.isNaN(wi) || wi < n) continue;
+    out[wi - n] = weekAmounts[key];
+  }
+  return out;
+}
+
 // "Roll forward" a period by n weeks: drop the first n (completed) weeks,
 // shift the remaining weeks up to fill weeks 1..(5-n), and open n new weeks
 // at the end. Returns a brand-new period object (the old one is left alone
@@ -235,8 +264,8 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   const next = makePeriod(uid("p"), autoPeriodLabel(newStart), newStart);
   next.openingCash = Math.round(lastDropped.closing * 100) / 100;
   next.locOpeningBalance = Math.round(lastDropped.locBalance * 100) / 100;
-  next.payroll = { amount: old.payroll?.amount || 0, weeks: shiftWeeksArray(old.payroll?.weeks, n) };
-  next.k401 = { amount: old.k401?.amount || 0, weeks: shiftWeeksArray(old.k401?.weeks, n) };
+  next.payroll = { amount: old.payroll?.amount || 0, weeks: shiftWeeksArray(old.payroll?.weeks, n), weekAmounts: shiftWeekAmounts(old.payroll?.weekAmounts, n) };
+  next.k401 = { amount: old.k401?.amount || 0, weeks: shiftWeeksArray(old.k401?.weeks, n), weekAmounts: shiftWeekAmounts(old.k401?.weekAmounts, n) };
   next.overrides = shiftOverrides(old.overrides, n);
   next.notes = shiftNotes(old.notes, n);
 
@@ -246,11 +275,9 @@ export function rollForwardPeriod(state, periodId, weeksToRoll = 1) {
   next.ebOpeningCash = Math.round(ebCalc.weeks[n - 1].closing * 100) / 100;
   next.basinSavingsOpeningCash = Math.round(basinSavingsCalc.weeks[n - 1].closing * 100) / 100;
   next.pcSavingsOpeningCash = Math.round(pcSavingsCalc.weeks[n - 1].closing * 100) / 100;
-  next.pcPayroll = { amount: old.pcPayroll?.amount || 0, weeks: shiftWeeksArray(old.pcPayroll?.weeks, n) };
-  next.pcK401 = { amount: old.pcK401?.amount || 0, weeks: shiftWeeksArray(old.pcK401?.weeks, n) };
+  next.pcPayroll = { amount: old.pcPayroll?.amount || 0, weeks: shiftWeeksArray(old.pcPayroll?.weeks, n), weekAmounts: shiftWeekAmounts(old.pcPayroll?.weekAmounts, n) };
+  next.pcK401 = { amount: old.pcK401?.amount || 0, weeks: shiftWeeksArray(old.pcK401?.weeks, n), weekAmounts: shiftWeekAmounts(old.pcK401?.weekAmounts, n) };
   next.pcOtherOutflow = shiftWeekMap(old.pcOtherOutflow, n);
-  next.transfers = {};
-  for (const key of ["basinSavingsTransfer", "pcSavingsTransfer", "toPcSavings"]) next.transfers[key] = shiftWeekMap(old.transfers?.[key], n);
 
   // Anything still open that was sitting in one of the now-dropped weeks is
   // presumed handled by now — close it out so it stops counting toward the
@@ -375,6 +402,52 @@ export function k401WeeksFor(period) {
   return (period.k401?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD).sort((a, b) => a - b);
 }
 
+// Effective dollar amount for a specific week in a payroll/401k bucket —
+// the per-week override if one's been set, otherwise the base amount.
+export function weekAmountFor(bucket, wi) {
+  if (!bucket) return 0;
+  const override = bucket.weekAmounts?.[wi];
+  return override !== undefined && override !== null ? override : (bucket.amount || 0);
+}
+
+// Combines manual state.transfers[] records and recurring transfer-flagged
+// Fixed Payments (transferFrom/transferTo both set) into one picture for a
+// given account: how much is coming in and going out each week, and the
+// individual line items (with counterpart account) behind those totals.
+// Entering a transfer once — either manually or as a Fixed Payment — is
+// automatically reflected on BOTH accounts' forecasts from this single function.
+export function interCompanyTransfersForAccount(state, period, accountId) {
+  const inflowByWeek = Array(WEEKS_PER_PERIOD).fill(0);
+  const outflowByWeek = Array(WEEKS_PER_PERIOD).fill(0);
+  const itemsByWeek = Array.from({ length: WEEKS_PER_PERIOD }, () => ({ inflow: [], outflow: [] }));
+
+  const record = (wi, direction, counterpart, amount, source, refId, note) => {
+    if (wi === null || wi === undefined || !amount) return;
+    const bucket = direction === "in" ? inflowByWeek : outflowByWeek;
+    const itemKey = direction === "in" ? "inflow" : "outflow";
+    bucket[wi] += amount;
+    itemsByWeek[wi][itemKey].push({ counterpart, amount, source, id: refId, note: note || "" });
+  };
+
+  for (const t of state.transfers || []) {
+    const wi = weekIndexForDate(period, t.date);
+    if (wi === null) continue;
+    if (t.toAccount === accountId) record(wi, "in", t.fromAccount, t.amount, "manual", t.id, t.note);
+    if (t.fromAccount === accountId) record(wi, "out", t.toAccount, t.amount, "manual", t.id, t.note);
+  }
+  for (const fp of state.fixedPayments) {
+    if (fp.active === false || !fp.transferFrom || !fp.transferTo) continue;
+    for (const dateISO of fixedOccurrencesInPeriod(fp, period)) {
+      const wi = weekIndexForDate(period, dateISO);
+      if (wi === null) continue;
+      if (fp.transferTo === accountId) record(wi, "in", fp.transferFrom, fp.amount, "fixed", fp.id, fp.name);
+      if (fp.transferFrom === accountId) record(wi, "out", fp.transferTo, fp.amount, "fixed", fp.id, fp.name);
+    }
+  }
+
+  return { inflowByWeek, outflowByWeek, itemsByWeek };
+}
+
 // "Pay when paid" — a payable's CF date is derived from the next pay run after
 // the linked receivable's own CF date, rather than being set directly. The
 // link can point at an Existing AR invoice, or an Unbilled Receivables line
@@ -441,15 +514,15 @@ export function computeForecast(state, period) {
   const scheduledFixed = {};
   for (const cat of fixedCategories) scheduledFixed[cat] = Array(WEEKS_PER_PERIOD).fill(0);
 
-  // payroll and 401K each post on whichever weeks were manually selected for this period
-  const payrollAmount = period.payroll?.amount || 0;
-  const k401Amount = period.k401?.amount || 0;
-  if (payrollAmount) for (const wi of payrollWeeksFor(period)) scheduledFixed.Payroll[wi] += payrollAmount;
-  if (k401Amount) for (const wi of k401WeeksFor(period)) scheduledFixed["401K"][wi] += k401Amount;
+  // payroll and 401K each post on whichever weeks were manually selected for
+  // this period, using that week's own amount if one's been set (otherwise the base amount)
+  for (const wi of payrollWeeksFor(period)) scheduledFixed.Payroll[wi] += weekAmountFor(period.payroll, wi);
+  for (const wi of k401WeeksFor(period)) scheduledFixed["401K"][wi] += weekAmountFor(period.k401, wi);
 
   for (const item of state.fixedPayments) {
     if (item.active === false) continue;
     if (item.category === "Payroll" || item.category === "401K") continue; // period-driven, not a recurring template
+    if (item.transferFrom && item.transferTo) continue; // posts via Inter Company Transfer instead, not its category
     const occ = fixedOccurrencesInPeriod(item, period);
     for (const dateISO of occ) {
       const wi = weekIndexForDate(period, dateISO);
@@ -457,11 +530,14 @@ export function computeForecast(state, period) {
     }
   }
 
+  const ic = interCompanyTransfersForAccount(state, period, "basin-checking");
+
   const rows = weeks.map((w) => {
     const wi = w.index;
     const receivablesCollected = scheduledReceivables[wi]; // always computed from CF dates — not manually overridable
     const otherInflows = ovVal(ov, "otherInflows", wi, 0);
-    const totalInflows = receivablesCollected + otherInflows;
+    const interCompanyIn = ic.inflowByWeek[wi];
+    const totalInflows = receivablesCollected + otherInflows + interCompanyIn;
 
     const manualOutflows = {};
     let manualTotal = 0;
@@ -480,28 +556,21 @@ export function computeForecast(state, period) {
     }
 
     const apPayables = -scheduledPayables[wi]; // always computed from Payables' CF dates — not manually overridable
-    const totalOutflows = manualTotal + fixedTotal + apPayables;
+    const interCompanyOut = -ic.outflowByWeek[wi];
+    const totalOutflows = manualTotal + fixedTotal + apPayables + interCompanyOut;
 
     const netCashflow = totalInflows + totalOutflows;
     const locDraw = readOv(ov.locDraw?.[wi]) ?? 0;
 
-    // Inter-account transfers with the two savings accounts — each is ONE
-    // signed field, editable here (same convention as LOC Draw): negative =
-    // money leaving Basin Checking into that savings account, positive =
-    // money arriving in Basin Checking from that savings account.
-    const basinSavingsTransfer = readOv(period.transfers?.basinSavingsTransfer?.[wi]) ?? 0;
-    const pcSavingsTransfer = readOv(period.transfers?.pcSavingsTransfer?.[wi]) ?? 0;
-    const transfersNet = basinSavingsTransfer + pcSavingsTransfer;
-
     return {
       week: w,
       receivablesCollected, receivablesScheduled: scheduledReceivables[wi],
-      otherInflows, totalInflows,
+      otherInflows, interCompanyIn, interCompanyItems: ic.itemsByWeek[wi], totalInflows,
       manualOutflows, manualTotal,
       fixedRows, fixedTotal,
       apPayables, apScheduled: -scheduledPayables[wi],
+      interCompanyOut,
       totalOutflows, netCashflow, locDraw,
-      basinSavingsTransfer, pcSavingsTransfer, transfersNet,
     };
   });
 
@@ -509,7 +578,7 @@ export function computeForecast(state, period) {
   let opening = period.openingCash || 0;
   for (const row of rows) {
     row.opening = opening;
-    row.closing = opening + row.netCashflow + row.locDraw + row.transfersNet;
+    row.closing = opening + row.netCashflow + row.locDraw;
     opening = row.closing;
   }
 
@@ -538,9 +607,8 @@ export function computeForecast(state, period) {
     netCashflow: sum(rows.map((r) => r.netCashflow)),
     locDraw: sum(rows.map((r) => r.locDraw)),
     locBalance: rows[rows.length - 1]?.locBalance ?? (period.locOpeningBalance || 0),
-    basinSavingsTransfer: sum(rows.map((r) => r.basinSavingsTransfer)),
-    pcSavingsTransfer: sum(rows.map((r) => r.pcSavingsTransfer)),
-    transfersNet: sum(rows.map((r) => r.transfersNet)),
+    interCompanyIn: sum(rows.map((r) => r.interCompanyIn)),
+    interCompanyOut: sum(rows.map((r) => r.interCompanyOut)),
   };
 
   return { weeks: rows, totals, fixedCategories };
@@ -565,20 +633,10 @@ export function computeSimpleAccountForecast(state, period, accountId) {
       scheduled[wi] += (r.originalBalance ?? r.balance);
     }
   }
-  if (accountId === "eb-savings") {
-    for (const item of state.fixedPayments) {
-      if (item.active === false || item.transfersToAccount !== "eb-savings") continue;
-      for (const dateISO of fixedOccurrencesInPeriod(item, period)) {
-        const wi = weekIndexForDate(period, dateISO);
-        if (wi !== null) scheduled[wi] += item.amount;
-      }
-    }
-  }
 
-  const pcPayrollAmount = period.pcPayroll?.amount || 0;
-  const pcK401Amount = period.pcK401?.amount || 0;
   const pcPayrollWeeks = (period.pcPayroll?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
   const pcK401Weeks = (period.pcK401?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
+  const ic = interCompanyTransfersForAccount(state, period, accountId);
 
   const rows = weeks.map((w) => {
     const wi = w.index;
@@ -587,40 +645,20 @@ export function computeSimpleAccountForecast(state, period, accountId) {
 
     if (accountId === "pc-checking") {
       inflows.push({ key: "receivablesCollected", label: "Receivables Collected", amount: scheduled[wi], editable: false });
-      if (pcPayrollAmount && pcPayrollWeeks.includes(wi)) outflows.push({ key: "pcPayroll", label: "Payroll", amount: -pcPayrollAmount, editable: false });
-      if (pcK401Amount && pcK401Weeks.includes(wi)) outflows.push({ key: "pcK401", label: "401K", amount: -pcK401Amount, editable: false });
+      if (pcPayrollWeeks.includes(wi)) outflows.push({ key: "pcPayroll", label: "Payroll", amount: -weekAmountFor(period.pcPayroll, wi), editable: false });
+      if (pcK401Weeks.includes(wi)) outflows.push({ key: "pcK401", label: "401K", amount: -weekAmountFor(period.pcK401, wi), editable: false });
       outflows.push({ key: "pcOtherOutflow", label: "Other Outflow", amount: readOv(period.pcOtherOutflow?.[wi]) ?? 0, editable: true });
-      // editable here (this is the "from" side) — type as negative, same convention as every other outflow
-      outflows.push({ key: "toPcSavings", label: "Transfer to P&C Savings", amount: readOv(period.transfers?.toPcSavings?.[wi]) ?? 0, editable: true });
     }
 
-    if (accountId === "eb-savings") {
-      inflows.push({ key: "bonusTransfer", label: "Transfer from Basin Checking", amount: scheduled[wi], editable: false });
-    }
-
-    if (accountId === "basin-savings") {
-      // Fully mirrored — editable only on Basin Checking's own page now.
-      // Negative there = arriving here; positive there = leaving here.
-      const bst = readOv(period.transfers?.basinSavingsTransfer?.[wi]) ?? 0;
-      inflows.push({ key: "fromBasinChecking", label: "Transfer from Basin Checking", amount: bst < 0 ? -bst : 0, editable: false });
-      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: bst > 0 ? -bst : 0, editable: false });
-    }
-
-    if (accountId === "pc-savings") {
-      // read-only mirror of P&C Checking's own "Transfer to P&C Savings" edit
-      const inAmt = -(readOv(period.transfers?.toPcSavings?.[wi]) ?? 0);
-      inflows.push({ key: "fromPcChecking", label: "Transfer from P&C Checking", amount: inAmt, editable: false });
-      // the Basin Checking <-> P&C Savings leg — fully mirrored, editable only
-      // on Basin Checking's page. Negative there = arriving here (direct from
-      // Basin Checking); positive there = leaving here back to Basin Checking.
-      const pst = readOv(period.transfers?.pcSavingsTransfer?.[wi]) ?? 0;
-      inflows.push({ key: "fromBasinCheckingDirect", label: "Transfer from Basin Checking", amount: pst < 0 ? -pst : 0, editable: false });
-      outflows.push({ key: "toBasinChecking", label: "Transfer to Basin Checking", amount: pst > 0 ? -pst : 0, editable: false });
-    }
+    // Every account gets exactly one Inter Company Transfer line in each
+    // direction — entering a transfer once (manually, or as a recurring
+    // Fixed Payment) automatically shows up on both accounts involved.
+    inflows.push({ key: "interCompanyIn", label: "Inter Company Transfer", amount: ic.inflowByWeek[wi], editable: false, isTransfer: true });
+    outflows.push({ key: "interCompanyOut", label: "Inter Company Transfer", amount: -ic.outflowByWeek[wi], editable: false, isTransfer: true });
 
     const inflowTotal = sum(inflows.map((r) => r.amount));
     const outflowTotal = sum(outflows.map((r) => r.amount));
-    return { week: w, inflows, outflows, inflowTotal, outflowTotal, netCashflow: inflowTotal + outflowTotal };
+    return { week: w, inflows, outflows, inflowTotal, outflowTotal, netCashflow: inflowTotal + outflowTotal, interCompanyItems: ic.itemsByWeek[wi] };
   });
 
   let opening = period[openingKey] || 0;
@@ -692,16 +730,6 @@ function mergeOverrides(localOv, remoteOv) {
   return merged;
 }
 
-function mergeTransfers(localT, remoteT) {
-  localT = localT || {};
-  remoteT = remoteT || {};
-  const out = {};
-  for (const key of ["basinSavingsTransfer", "pcSavingsTransfer", "toPcSavings"]) {
-    out[key] = mergeTimestampedMap(localT[key], remoteT[key]);
-  }
-  return out;
-}
-
 function timeOfRecord(r) {
   return r && r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
 }
@@ -759,7 +787,6 @@ export function mergeStates(local, remote) {
       ...rp, ...lp,
       overrides: mergeOverrides(lp.overrides, rp.overrides),
       notes: { ...rp.notes, ...lp.notes },
-      transfers: mergeTransfers(lp.transfers, rp.transfers),
       pcOtherOutflow: mergeTimestampedMap(lp.pcOtherOutflow, rp.pcOtherOutflow),
     };
   });
@@ -771,12 +798,14 @@ export function mergeStates(local, remote) {
   merged.unbilledReceivables = mergeById(local.unbilledReceivables || [], remote.unbilledReceivables || [], lt.unbilledReceivables, rt.unbilledReceivables);
   merged.payables = mergeById(local.payables, remote.payables, lt.payables, rt.payables);
   merged.fixedPayments = mergeById(local.fixedPayments, remote.fixedPayments, lt.fixedPayments, rt.fixedPayments);
+  merged.transfers = mergeById(local.transfers || [], remote.transfers || [], lt.transfers, rt.transfers);
 
   merged.tombstones = {
     receivables: mergeTombstones(lt.receivables, rt.receivables),
     payables: mergeTombstones(lt.payables, rt.payables),
     fixedPayments: mergeTombstones(lt.fixedPayments, rt.fixedPayments),
     unbilledReceivables: mergeTombstones(lt.unbilledReceivables, rt.unbilledReceivables),
+    transfers: mergeTombstones(lt.transfers, rt.transfers),
   };
 
   merged.customerAutoSchedule = { ...remote.customerAutoSchedule, ...local.customerAutoSchedule };
