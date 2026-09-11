@@ -741,6 +741,12 @@ button.payrun-filter-btn.active .filter-icon{ opacity:1; color:var(--brass); }
 /* ===================== FIXED PAYMENTS ===================== */
 .fixed-group{ margin-bottom:16px; }
 .fixed-group-head{ display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line);}
+
+.interest-inputs-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; padding:14px 16px 10px; }
+.interest-field label{ display:block; font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim); margin-bottom:5px; }
+.interest-field-input{ display:flex; align-items:center; gap:5px; color:var(--text-dim); font-size:12px; }
+.interest-field .mini-input{ width:100%; }
+.interest-field-input .mini-input{ width:60px; }
 .fixed-group-head h3{ font-size:14px; text-transform:uppercase; letter-spacing:0.09em; color:var(--brass-bright); font-family:var(--font-mono); font-weight:700; text-shadow:0 0 10px rgba(230,195,126,0.2);}
 .fixed-group-head .count{ color:var(--text-mid); font-weight:500; font-size:12px; margin-left:8px;}
 .fixed-group-head .total{ font-family:var(--font-mono); color:var(--brass-bright); font-size:14px; }

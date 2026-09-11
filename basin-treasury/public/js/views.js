@@ -2,7 +2,7 @@ import { fmtMoney, fmtDate, fmtDateShort, escapeHtml, toast, openModal, closeMod
 import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor, weekAmountFor,
-  effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone,
+  effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone, interestForAccount,
   ACCOUNTS, accountName, computeForecastForAccount, computeSimpleAccountForecast,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
@@ -2276,9 +2276,41 @@ export function renderFixed(store) {
     </div>
   `;
 
+  const interestAccounts = [
+    { id: "basin-savings", name: "Basin Savings", color: "var(--brass)" },
+    { id: "eb-savings", name: "EB Savings", color: "var(--violet)" },
+    { id: "pc-savings", name: "P&C Savings", color: "var(--cyan)" },
+  ];
+  const interestPanel = interestAccounts.map((acct) => {
+    const cfg = period.interest?.[acct.id] || { rate: 0, dayOfMonth: 1, avgBalance: 0 };
+    const { amount: monthlyInterest } = interestForAccount(state, period, acct.id);
+    return `
+      <div class="panel fixed-group interest-panel" style="border-top:2px solid ${acct.color};" data-interest-acct="${acct.id}">
+        <div class="fixed-group-head">
+          <h3>${escapeHtml(acct.name)} Interest</h3>
+          <span class="total">${fmtMoney(monthlyInterest)} / posting</span>
+        </div>
+        <div class="interest-inputs-row">
+          <div class="interest-field">
+            <label>Annual Rate</label>
+            <div class="interest-field-input"><input type="number" step="0.01" min="0" class="mini-input interest-rate-input" value="${((cfg.rate || 0) * 100).toFixed(2)}" />%</div>
+          </div>
+          <div class="interest-field">
+            <label>Posts on Day</label>
+            <input type="number" min="1" max="31" class="mini-input interest-dom-input" value="${cfg.dayOfMonth || 1}" />
+          </div>
+          <div class="interest-field">
+            <label>Avg Monthly Balance</label>
+            <input type="number" step="0.01" min="0" class="mini-input interest-avgbal-input" value="${cfg.avgBalance || 0}" />
+          </div>
+        </div>
+        <div class="fsched" style="padding:0 16px 14px;">Interest = Avg Monthly Balance × (Annual Rate ÷ 12) = ${fmtMoney(monthlyInterest)} each time it posts</div>
+      </div>`;
+  }).join("");
+
   let periodTotal = payrollWeeks.length * payrollAmt + k401Weeks.length * k401Amt;
   const host = document.getElementById("fixed-groups");
-  host.innerHTML = payrollPanel + pcPayrollPanel + categories.filter((c) => c !== "Payroll" && c !== "401K").map((cat) => {
+  host.innerHTML = payrollPanel + pcPayrollPanel + interestPanel + categories.filter((c) => c !== "Payroll" && c !== "401K").map((cat) => {
     const items = state.fixedPayments.filter((f) => f.category === cat);
     let groupTotal = 0;
     const rows = items.map((item) => {
@@ -2381,6 +2413,26 @@ export function renderFixed(store) {
         if (bucket.weekAmounts) delete bucket.weekAmounts[wi];
       });
     });
+  });
+
+  host.querySelectorAll(".interest-panel").forEach((panel) => {
+    const acctId = panel.dataset.interestAcct;
+    const commit = (cssSuffix, fieldName, transform) => {
+      const input = panel.querySelector(`.interest-${cssSuffix}-input`);
+      input.addEventListener("change", () => {
+        const raw = parseFloat(input.value || "0");
+        store.mutate((s) => {
+          const per = s.periods.find((p) => p.id === period.id);
+          per.interest = per.interest || {};
+          per.interest[acctId] = per.interest[acctId] || { rate: 0, dayOfMonth: 1, avgBalance: 0 };
+          const val = Number.isNaN(raw) ? 0 : raw;
+          per.interest[acctId][fieldName] = transform ? transform(val) : val;
+        });
+      });
+    };
+    commit("rate", "rate", (v) => Math.max(0, v) / 100); // entered as a percent, stored as a decimal
+    commit("dom", "dayOfMonth", (v) => Math.min(31, Math.max(1, Math.round(v) || 1)));
+    commit("avgbal", "avgBalance", (v) => Math.max(0, v));
   });
 
   host.querySelectorAll(".add-fixed").forEach((b) => b.addEventListener("click", () => openFixedModal(store, { category: b.dataset.cat })));

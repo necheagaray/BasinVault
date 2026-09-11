@@ -448,6 +448,23 @@ export function interCompanyTransfersForAccount(state, period, accountId) {
   return { inflowByWeek, outflowByWeek, itemsByWeek };
 }
 
+// Interest for one of the 3 savings accounts — posts monthly on the
+// configured day, computed as avgBalance * (annual rate / 12). Reuses the
+// same monthly-occurrence engine Fixed Payments already use.
+export function interestForAccount(state, period, accountId) {
+  const perWeek = Array(WEEKS_PER_PERIOD).fill(0);
+  const cfg = period.interest?.[accountId];
+  if (!cfg || !cfg.rate || !cfg.avgBalance) return { perWeek, amount: 0 };
+  const amount = Math.round(cfg.avgBalance * (cfg.rate / 12) * 100) / 100;
+  if (!amount) return { perWeek, amount: 0 };
+  const occurrences = fixedOccurrencesInPeriod({ scheduleType: "monthly", dayOfMonth: cfg.dayOfMonth || 1 }, period);
+  for (const dateISO of occurrences) {
+    const wi = weekIndexForDate(period, dateISO);
+    if (wi !== null) perWeek[wi] += amount;
+  }
+  return { perWeek, amount };
+}
+
 // "Pay when paid" — a payable's CF date is derived from the next pay run after
 // the linked receivable's own CF date, rather than being set directly. The
 // link can point at an Existing AR invoice, or an Unbilled Receivables line
@@ -639,6 +656,8 @@ export function computeSimpleAccountForecast(state, period, accountId) {
   const pcPayrollWeeks = (period.pcPayroll?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
   const pcK401Weeks = (period.pcK401?.weeks || []).filter((w) => w >= 0 && w < WEEKS_PER_PERIOD);
   const ic = interCompanyTransfersForAccount(state, period, accountId);
+  const isSavingsAccount = accountId === "basin-savings" || accountId === "eb-savings" || accountId === "pc-savings";
+  const interest = isSavingsAccount ? interestForAccount(state, period, accountId) : null;
 
   const rows = weeks.map((w) => {
     const wi = w.index;
@@ -650,6 +669,10 @@ export function computeSimpleAccountForecast(state, period, accountId) {
       if (pcPayrollWeeks.includes(wi)) outflows.push({ key: "pcPayroll", label: "Payroll", amount: -weekAmountFor(period.pcPayroll, wi), editable: false });
       if (pcK401Weeks.includes(wi)) outflows.push({ key: "pcK401", label: "401K", amount: -weekAmountFor(period.pcK401, wi), editable: false });
       outflows.push({ key: "pcOtherOutflow", label: "Other Outflow", amount: readOv(period.pcOtherOutflow?.[wi]) ?? 0, editable: true });
+    }
+
+    if (isSavingsAccount && interest.perWeek[wi]) {
+      inflows.push({ key: "interestIncome", label: "Interest Income", amount: interest.perWeek[wi], editable: false });
     }
 
     // Every account gets exactly one Inter Company Transfer line in each
