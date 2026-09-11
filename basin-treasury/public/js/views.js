@@ -156,9 +156,9 @@ function labelCell(period, label, rowType, cat, editable) {
   return `<td>${labelSpan}</td>`;
 }
 
-function receivablesBreakdown(state, period, wi /* number or null = whole period */) {
+function receivablesBreakdown(state, period, wi, accountFilter = null /* e.g. "basin-checking" to scope to just that account's own forecast */) {
   const matchesFor = (r) => {
-    if ((r.depositAccount || "basin-checking") !== "basin-checking") return false;
+    if (accountFilter && (r.depositAccount || "basin-checking") !== accountFilter) return false;
     const idx = r.status === "paid" ? weekIndexForDateStrict(period, r.cfDate) : weekIndexForDate(period, r.cfDate);
     if (idx === null) return false;
     return wi === null ? true : idx === wi;
@@ -586,8 +586,8 @@ export function renderForecast(store) {
     <div class="stat-card sc-close"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
   `;
 
-  const rcBreakdowns = weeks.map((r, wi) => receivablesBreakdown(state, period, wi));
-  const rcTotalBreakdown = receivablesBreakdown(state, period, null);
+  const rcBreakdowns = weeks.map((r, wi) => receivablesBreakdown(state, period, wi, "basin-checking"));
+  const rcTotalBreakdown = receivablesBreakdown(state, period, null, "basin-checking");
 
   const table = document.getElementById("cf-grid");
   table.innerHTML = `
