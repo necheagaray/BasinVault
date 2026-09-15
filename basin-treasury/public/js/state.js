@@ -37,6 +37,7 @@ export function migratePeriod(period) {
   if (!period.pcPayroll) period.pcPayroll = { amount: 0, weeks: [] };
   if (!period.pcK401) period.pcK401 = { amount: 0, weeks: [] };
   if (!period.pcOtherOutflow) period.pcOtherOutflow = {};
+  if (!period.basinSavingsDistributions) period.basinSavingsDistributions = {};
   if (period.payroll && !period.payroll.weekAmounts) period.payroll.weekAmounts = {};
   if (period.k401 && !period.k401.weekAmounts) period.k401.weekAmounts = {};
   if (period.pcPayroll && !period.pcPayroll.weekAmounts) period.pcPayroll.weekAmounts = {};
@@ -164,6 +165,8 @@ export function makePeriod(id, label, startISO) {
       "eb-savings": { rate: 0, dayOfMonth: 1, avgBalance: 0 },
       "pc-savings": { rate: 0, dayOfMonth: 1, avgBalance: 0 },
     },
+
+    basinSavingsDistributions: {}, // { [weekIndex]: { v, by, at } } — manual outflow, same override shape as everything else
   };
 }
 
@@ -669,6 +672,10 @@ export function computeSimpleAccountForecast(state, period, accountId) {
       if (pcPayrollWeeks.includes(wi)) outflows.push({ key: "pcPayroll", label: "Payroll", amount: -weekAmountFor(period.pcPayroll, wi), editable: false });
       if (pcK401Weeks.includes(wi)) outflows.push({ key: "pcK401", label: "401K", amount: -weekAmountFor(period.pcK401, wi), editable: false });
       outflows.push({ key: "pcOtherOutflow", label: "Other Outflow", amount: readOv(period.pcOtherOutflow?.[wi]) ?? 0, editable: true });
+    }
+
+    if (accountId === "basin-savings") {
+      outflows.push({ key: "basinSavingsDistributions", label: "Distributions", amount: readOv(period.basinSavingsDistributions?.[wi]) ?? 0, editable: true });
     }
 
     if (isSavingsAccount && interest.perWeek[wi]) {

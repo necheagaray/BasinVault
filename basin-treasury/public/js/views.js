@@ -328,6 +328,7 @@ const SIMPLE_OPENING_KEY = { "pc-checking": "pcOpeningCash", "eb-savings": "ebOp
 
 function writeSimpleTransferField(period, accountId, key, wi, stamped) {
   if (key === "pcOtherOutflow") { period.pcOtherOutflow = period.pcOtherOutflow || {}; setOrDel(period.pcOtherOutflow, wi, stamped); }
+  if (key === "basinSavingsDistributions") { period.basinSavingsDistributions = period.basinSavingsDistributions || {}; setOrDel(period.basinSavingsDistributions, wi, stamped); }
 }
 
 function renderSimpleAccountForecast(store, period, accountId) {
