@@ -324,6 +324,47 @@ function attachBreakdownClick(td, getBreakdown, getLabel, buildHTML = breakdownP
 
 function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
 
+// Recomputes Basin Checking's totals over just the weeks currently being
+// viewed, so "Total" always matches whatever week-columns are on screen
+// instead of silently including weeks the 6-week view hides.
+function sliceTotals(weeks) {
+  const manualCats = new Set();
+  const fixedCats = new Set();
+  weeks.forEach((w) => {
+    Object.keys(w.manualOutflows || {}).forEach((c) => manualCats.add(c));
+    Object.keys(w.fixedRows || {}).forEach((c) => fixedCats.add(c));
+  });
+  return {
+    opening: weeks[0]?.opening ?? 0,
+    closing: weeks[weeks.length - 1]?.closing ?? 0,
+    receivablesCollected: sum(weeks.map((r) => r.receivablesCollected)),
+    otherInflows: sum(weeks.map((r) => r.otherInflows)),
+    totalInflows: sum(weeks.map((r) => r.totalInflows)),
+    manualOutflows: Object.fromEntries(Array.from(manualCats).map((c) => [c, sum(weeks.map((r) => r.manualOutflows[c] || 0))])),
+    manualTotal: sum(weeks.map((r) => r.manualTotal)),
+    fixedRows: Object.fromEntries(Array.from(fixedCats).map((c) => [c, sum(weeks.map((r) => r.fixedRows[c] || 0))])),
+    fixedTotal: sum(weeks.map((r) => r.fixedTotal)),
+    apPayables: sum(weeks.map((r) => r.apPayables)),
+    totalOutflows: sum(weeks.map((r) => r.totalOutflows)),
+    netCashflow: sum(weeks.map((r) => r.netCashflow)),
+    locDraw: sum(weeks.map((r) => r.locDraw)),
+    locBalance: weeks[weeks.length - 1]?.locBalance ?? 0,
+    interCompanyIn: sum(weeks.map((r) => r.interCompanyIn)),
+    interCompanyOut: sum(weeks.map((r) => r.interCompanyOut)),
+  };
+}
+
+// Same idea, for the 4 simplified accounts.
+function sliceSimpleTotals(weeks) {
+  return {
+    opening: weeks[0]?.opening ?? 0,
+    closing: weeks[weeks.length - 1]?.closing ?? 0,
+    inflowTotal: sum(weeks.map((w) => w.inflowTotal)),
+    outflowTotal: sum(weeks.map((w) => w.outflowTotal)),
+    netCashflow: sum(weeks.map((w) => w.netCashflow)),
+  };
+}
+
 const SIMPLE_OPENING_KEY = { "pc-checking": "pcOpeningCash", "eb-savings": "ebOpeningCash", "basin-savings": "basinSavingsOpeningCash", "pc-savings": "pcSavingsOpeningCash" };
 
 function writeSimpleTransferField(period, accountId, key, wi, stamped) {
@@ -334,13 +375,14 @@ function writeSimpleTransferField(period, accountId, key, wi, stamped) {
 function renderSimpleAccountForecast(store, period, accountId) {
   const { state } = store;
   const calc = computeSimpleAccountForecast(state, period, accountId);
-  const weeks = calc.weeks;
-  const weeksMeta = periodWeeks(period);
+  const weeks = calc.weeks.slice(0, cfViewWeeks);
+  const weeksMeta = periodWeeks(period).slice(0, cfViewWeeks);
+  calc.totals = sliceSimpleTotals(weeks);
   const name = accountName(accountId);
   const openingKey = SIMPLE_OPENING_KEY[accountId];
 
   document.getElementById("forecast-title").textContent = `${name} — ${period.label}`;
-  document.getElementById("forecast-eyebrow").textContent = `${WEEKS_PER_PERIOD}-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
+  document.getElementById("forecast-eyebrow").textContent = `${cfViewWeeks}-Week View · Starts ${fmtDate(period.startDate)}`;
   document.getElementById("forecast-meta").textContent = accountId === "eb-savings"
     ? "No activity except the monthly transfer in from Basin Checking."
     : `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
@@ -553,7 +595,7 @@ function renderHomeSummaries(store, period) {
 export function renderForecast(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
-  const weeksMeta = periodWeeks(period);
+  const weeksMetaFull = periodWeeks(period); // always all 13 — Roll Forward needs the true full period regardless of what's being viewed
 
   const acctSel = document.getElementById("account-select");
   acctSel.innerHTML = ACCOUNTS.map((a) => `<option value="${a.id}" ${a.id === selectedAccountId ? "selected" : ""}>${a.isMain ? "★ " : ""}${escapeHtml(a.name)}${a.isMain ? " (Main)" : ""}</option>`).join("");
@@ -563,7 +605,13 @@ export function renderForecast(store) {
   sel.innerHTML = state.periods.map((p) => `<option value="${p.id}" ${p.id === period.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
   sel.onchange = () => { state.activePeriodId = sel.value; store.render(); };
 
-  document.getElementById("btn-roll-forward").onclick = () => openRollForwardModal(store, period, computeForecast(state, period), weeksMeta);
+  const viewSel = document.getElementById("weeks-view-select");
+  if (viewSel) {
+    viewSel.innerHTML = `<option value="6" ${cfViewWeeks === 6 ? "selected" : ""}>6 Weeks</option><option value="13" ${cfViewWeeks === 13 ? "selected" : ""}>13 Weeks</option>`;
+    viewSel.onchange = () => { cfViewWeeks = Number(viewSel.value); store.render(); };
+  }
+
+  document.getElementById("btn-roll-forward").onclick = () => openRollForwardModal(store, period, computeForecast(state, period), weeksMetaFull);
 
   if (selectedAccountId !== "basin-checking") {
     renderSimpleAccountForecast(store, period, selectedAccountId);
@@ -571,10 +619,12 @@ export function renderForecast(store) {
   }
 
   const calc = computeForecast(state, period);
-  const weeks = calc.weeks;
+  const weeks = calc.weeks.slice(0, cfViewWeeks);
+  const weeksMeta = weeksMetaFull.slice(0, cfViewWeeks);
+  calc.totals = sliceTotals(weeks); // every calc.totals.X reference below now reflects just the viewed weeks
 
   document.getElementById("forecast-title").textContent = period.label;
-  document.getElementById("forecast-eyebrow").textContent = `${WEEKS_PER_PERIOD}-Week Cash Flow Forecast · Starts ${fmtDate(period.startDate)}`;
+  document.getElementById("forecast-eyebrow").textContent = `${cfViewWeeks}-Week View · Starts ${fmtDate(period.startDate)}`;
   document.getElementById("forecast-meta").textContent = `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
 
   const statRow = document.getElementById("forecast-stats");
@@ -946,6 +996,7 @@ function openItemNoteModal(store, listKey, id) {
 /* ============================================================ RECEIVABLES ============================================================ */
 
 let selectedAccountId = "basin-checking";
+let cfViewWeeks = 6; // 6 or 13 — the period is always 13 weeks; this only controls the display
 
 let arFilter = "open", arSearch = "", arWeekFilter = null, arCustomerFilter = "";
 const arSelected = new Set();

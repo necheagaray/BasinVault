@@ -168,6 +168,7 @@
           <div class="page-head-actions">
             <select class="period-select" id="account-select"></select>
             <select class="period-select" id="period-select"></select>
+            <select class="period-select" id="weeks-view-select" title="How many of the 13 weeks to show"></select>
             <button class="btn-ghost" id="btn-roll-forward" title="Drop the completed week, shift everything up, and open a new week at the end">⟳ Roll Forward</button>
           </div>
         </div>
@@ -370,7 +371,7 @@
 
       <div class="panel settings-section">
         <h3>Forecast Periods</h3>
-        <div class="desc">Each period is a 6-week cash flow forecast starting on the Sunday you choose. Switch the active period to change what both users see. Old periods are kept permanently.</div>
+        <div class="desc">Each period is a 13-week cash flow forecast starting on the Sunday you choose (view it as 6 or 13 weeks on each tab — the underlying period is always 13). Switch the active period to change what both users see. Old periods are kept permanently.</div>
         <div id="periods-list"></div>
         <button class="btn-ghost" id="btn-new-period" style="margin-top:12px;">+ New Period</button>
       </div>

@@ -1,6 +1,6 @@
 import { uid, toISO, parseISO, addDays, todayISO } from "./util.js";
 
-export const WEEKS_PER_PERIOD = 6;
+export const WEEKS_PER_PERIOD = 13;
 export const DEFAULT_OUTFLOW_CATEGORIES = ["Distributions", "Credit Card", "Sales Tax", "Other"];
 export const FIXED_CATEGORY_ORDER = [
   "Payroll",
