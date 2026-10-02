@@ -1,7 +1,7 @@
 import * as api from "./api.js";
 import { defaultState, mergeStates, migratePeriod, migrateTransfersToStateLevel } from "./state.js";
 import { debounce, toast, contourSVG, masterPlanSVG, vaultDoorSVG } from "./util.js";
-import { renderHome, renderForecast, renderReceivables, renderUnbilled, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets } from "./views.js";
+import { renderHome, renderForecast, renderReceivables, renderUnbilled, renderPayables, renderFixed, renderSettings, wireImportInputs, syncStickyOffsets, setGlobalViewWeeks, cfViewWeeks } from "./views.js";
 
 document.getElementById("login-contours").innerHTML = contourSVG(3, { w: 900, h: 700 });
 document.getElementById("topbar-contours").innerHTML = contourSVG(7, { w: 1600, h: 100 });
@@ -146,8 +146,10 @@ const Store = {
       this.state = snap.state;
       if (!this.state.unbilledReceivables) this.state.unbilledReceivables = [];
       if (!this.state.transfers) this.state.transfers = [];
-      if (!this.state.tombstones) this.state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {} };
+      if (!this.state.unbilledRevenue) this.state.unbilledRevenue = [];
+      if (!this.state.tombstones) this.state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {}, unbilledRevenue: {} };
       if (!this.state.tombstones.transfers) this.state.tombstones.transfers = {};
+      if (!this.state.tombstones.unbilledRevenue) this.state.tombstones.unbilledRevenue = {};
       this.state.periods.forEach((p) => migratePeriod(p));
       migrateTransfersToStateLevel(this.state);
       await this.pushNow();
@@ -192,8 +194,10 @@ async function boot() {
     if (!remote.manualOutflowCategories.includes("Other")) remote.manualOutflowCategories.push("Other");
     if (!remote.unbilledReceivables) remote.unbilledReceivables = [];
     if (!remote.transfers) remote.transfers = [];
-    if (!remote.tombstones) remote.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {} };
+    if (!remote.tombstones) remote.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {}, unbilledRevenue: {} };
     if (!remote.tombstones.transfers) remote.tombstones.transfers = {};
+    if (!remote.tombstones.unbilledRevenue) remote.tombstones.unbilledRevenue = {};
+    if (!remote.unbilledRevenue) { remote.unbilledRevenue = seedUnbilledRevenue(); }
     remote.periods.forEach((p) => migratePeriod(p));
     migrateTransfersToStateLevel(remote);
     Store.state = remote;
@@ -262,6 +266,18 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   Store.render();
   if (btn.dataset.view === "settings") Store.loadHistory();
 });
+
+function syncWeeksToggleButtons() {
+  document.querySelectorAll(".weeks-toggle-btn").forEach((b) => b.classList.toggle("active", Number(b.dataset.weeks) === cfViewWeeks));
+}
+document.getElementById("weeks-toggle-group").addEventListener("click", (e) => {
+  const btn = e.target.closest(".weeks-toggle-btn");
+  if (!btn) return;
+  setGlobalViewWeeks(Number(btn.dataset.weeks));
+  syncWeeksToggleButtons();
+  Store.render();
+});
+syncWeeksToggleButtons();
 
 wireImportInputs(Store);
 

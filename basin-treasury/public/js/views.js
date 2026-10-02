@@ -3,6 +3,7 @@ import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor, weekAmountFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone, interestForAccount,
+  UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice,
   ACCOUNTS, accountName, computeForecastForAccount, computeSimpleAccountForecast,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
@@ -120,17 +121,19 @@ function rowValue(weeksRows, rowType, cat, wi) {
     manual: r.manualOutflows[cat],
     fixed: r.fixedRows[cat],
     apPayables: r.apPayables,
+    projectedAP: r.projectedAP,
     locDraw: r.locDraw,
   }[rowType];
 }
 
-function overrideEntry(overrides, rowType, cat, wi) {
+function overrideEntry(overrides, rowType, cat, wi, period) {
   if (rowType === "receivablesCollected") return overrides.receivablesCollected[wi];
   if (rowType === "otherInflows") return overrides.otherInflows[wi];
   if (rowType === "manual") return overrides.manualOutflow?.[cat]?.[wi];
   if (rowType === "fixed") return overrides.fixedGroup?.[cat]?.[wi];
   if (rowType === "apPayables") return overrides.apPayables[wi];
   if (rowType === "locDraw") return overrides.locDraw[wi];
+  if (rowType === "projectedAP") return period?.projectedAP?.[wi];
   return undefined;
 }
 
@@ -142,6 +145,7 @@ function writeOverride(period, rowType, cat, wi, stamped) {
   if (rowType === "fixed") { o.fixedGroup[cat] = o.fixedGroup[cat] || {}; setOrDel(o.fixedGroup[cat], wi, stamped); }
   if (rowType === "apPayables") setOrDel(o.apPayables, wi, stamped);
   if (rowType === "locDraw") setOrDel(o.locDraw, wi, stamped);
+  if (rowType === "projectedAP") { period.projectedAP = period.projectedAP || {}; setOrDel(period.projectedAP, wi, stamped); }
 }
 
 function noteKey(rowType, cat, wi) {
@@ -345,6 +349,7 @@ function sliceTotals(weeks) {
     fixedRows: Object.fromEntries(Array.from(fixedCats).map((c) => [c, sum(weeks.map((r) => r.fixedRows[c] || 0))])),
     fixedTotal: sum(weeks.map((r) => r.fixedTotal)),
     apPayables: sum(weeks.map((r) => r.apPayables)),
+    projectedAP: sum(weeks.map((r) => r.projectedAP)),
     totalOutflows: sum(weeks.map((r) => r.totalOutflows)),
     netCashflow: sum(weeks.map((r) => r.netCashflow)),
     locDraw: sum(weeks.map((r) => r.locDraw)),
@@ -478,9 +483,14 @@ function renderSimpleAccountForecast(store, period, accountId) {
 export function renderHome(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
-  document.getElementById("home-meta").textContent = `${period.label} · ${WEEKS_PER_PERIOD}-week forecast · Starts ${fmtDate(period.startDate)}`;
+  document.getElementById("home-meta").textContent = `${period.label} · ${cfViewWeeks}-week view · Starts ${fmtDate(period.startDate)}`;
 
-  const calcFor = (id) => (id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id));
+  const calcFor = (id) => {
+    const full = id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id);
+    const weeks = full.weeks.slice(0, cfViewWeeks);
+    const totals = id === "basin-checking" ? sliceTotals(weeks) : sliceSimpleTotals(weeks);
+    return { weeks, totals };
+  };
 
   const cardHtml = (acct, extraClass = "") => {
     const calc = calcFor(acct.id);
@@ -492,7 +502,7 @@ export function renderHome(store) {
         <div class="account-card-figures">
           <div><div class="label">Opening</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
           <div><div class="label">Net Change</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal, { signed: true })}</div></div>
-          <div><div class="label">Closing (End of Forecast)</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+          <div><div class="label">Closing (End of ${cfViewWeeks}-Week View)</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
         </div>
         <div class="account-card-cta">View ${escapeHtml(acct.name)} Forecast ▸</div>
       </div>`;
@@ -524,11 +534,11 @@ export function renderHome(store) {
 
 function renderHomeSummaries(store, period) {
   const { state } = store;
-  const weeksMeta = periodWeeks(period);
+  const weeksMeta = periodWeeks(period).slice(0, cfViewWeeks);
 
   // weekly closing balance for every account, end of each week
   const calcFor = (id) => (id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id));
-  const closingsFor = (id) => calcFor(id).weeks.map((w) => w.closing);
+  const closingsFor = (id) => calcFor(id).weeks.slice(0, cfViewWeeks).map((w) => w.closing);
   const openingFor = (id) => calcFor(id).weeks[0].opening;
   const byId = Object.fromEntries(ACCOUNTS.map((a) => [a.id, closingsFor(a.id)]));
   const openingById = Object.fromEntries(ACCOUNTS.map((a) => [a.id, openingFor(a.id)]));
@@ -605,12 +615,6 @@ export function renderForecast(store) {
   sel.innerHTML = state.periods.map((p) => `<option value="${p.id}" ${p.id === period.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
   sel.onchange = () => { state.activePeriodId = sel.value; store.render(); };
 
-  const viewSel = document.getElementById("weeks-view-select");
-  if (viewSel) {
-    viewSel.innerHTML = `<option value="6" ${cfViewWeeks === 6 ? "selected" : ""}>6 Weeks</option><option value="13" ${cfViewWeeks === 13 ? "selected" : ""}>13 Weeks</option>`;
-    viewSel.onchange = () => { cfViewWeeks = Number(viewSel.value); store.render(); };
-  }
-
   document.getElementById("btn-roll-forward").onclick = () => openRollForwardModal(store, period, computeForecast(state, period), weeksMetaFull);
 
   if (selectedAccountId !== "basin-checking") {
@@ -666,6 +670,7 @@ export function renderForecast(store) {
         <tr class="fixed-row" data-row="fixed" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "fixed", cat, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from Fixed Payments — not manually editable">${fmtMoney(r.fixedRows[cat])}</td>`).join("")}<td title="Computed from Fixed Payments — not manually editable">${fmtMoney(calc.totals.fixedRows[cat])}</td></tr>
       `).join("")}
       <tr class="fixed-row ap-row" data-row="apPayables">${labelCell(period, "◆ Weekly AP Payables", "apPayables", null, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from payables' CF dates — not manually editable">${fmtMoney(r.apPayables)}</td>`).join("")}<td title="Computed from payables' CF dates — not manually editable">${fmtMoney(calc.totals.apPayables)}</td></tr>
+      <tr class="fixed-row" data-row="projectedAP">${labelCell(period, "Projected AP", "projectedAP", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.projectedAP)}</td>`).join("")}<td>${fmtMoney(calc.totals.projectedAP)}</td></tr>
       <tr class="fixed-row ic-row" data-row="interCompanyOut">${labelCell(period, "⇄ Inter Company Transfer", "interCompanyOut", null, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from Transfers — not manually editable">${fmtMoney(r.interCompanyOut)}${icAccountTag(r.interCompanyItems.outflow)}</td>`).join("")}<td title="Computed from Transfers — not manually editable">${fmtMoney(calc.totals.interCompanyOut)}</td></tr>
 
       <tr class="outflow-total" data-row="totalOutflows">${labelCell(period, "Total Outflows", "totalOutflows", null, false)}${weeks.map((r) => `<td class="value-neg">${fmtMoney(r.totalOutflows)}</td>`).join("")}<td class="value-neg">${fmtMoney(calc.totals.totalOutflows)}</td></tr>
@@ -996,7 +1001,12 @@ function openItemNoteModal(store, listKey, id) {
 /* ============================================================ RECEIVABLES ============================================================ */
 
 let selectedAccountId = "basin-checking";
-let cfViewWeeks = 6; // 6 or 13 — the period is always 13 weeks; this only controls the display
+// Global 6/13 week view toggle, shared by every page — the period is always
+// 13 weeks internally; this only controls how many weeks are displayed.
+// Lives here (not main.js) so every render function in this file can read it
+// directly; main.js drives it via setGlobalViewWeeks from the topbar buttons.
+export let cfViewWeeks = 6;
+export function setGlobalViewWeeks(n) { cfViewWeeks = n === 13 ? 13 : 6; }
 
 let arFilter = "open", arSearch = "", arWeekFilter = null, arCustomerFilter = "";
 const arSelected = new Set();
@@ -1011,7 +1021,7 @@ function customerSortKey(name) {
 export function renderReceivables(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
-  const weeks = periodWeeks(period);
+  const weeks = periodWeeks(period).slice(0, cfViewWeeks);
 
   const openList = state.receivables.filter((r) => r.status === "open");
   const totalAR = state.receivables.reduce((a, r) => a + r.balance, 0);
@@ -1437,7 +1447,7 @@ const BILL_PERCENTS = [25, 50, 75, 90, 100, 110];
 export function renderUnbilled(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
-  const weeks = periodWeeks(period);
+  const weeks = periodWeeks(period).slice(0, cfViewWeeks);
   const list0 = state.unbilledReceivables || [];
 
   const openList = list0.filter((u) => u.status === "open");
@@ -1480,6 +1490,7 @@ export function renderUnbilled(store) {
   };
 
   renderUnbilledRows(store, period);
+  renderUnbilledRevenueSections(store, period);
 }
 
 function openTopUnbilledCustomersModal(openList) {
@@ -1494,6 +1505,149 @@ function openTopUnbilledCustomersModal(openList) {
     <h3>🏆 Top 5 Customer Balances — Unbilled</h3>
     ${rows}
   `, { onMount: (host) => { host.querySelector("#insight-close").onclick = closeModal; } });
+}
+
+function urvInvoiceCell(item, idx) {
+  const inv = item.invoices[idx] || blankInvoice();
+  if (!inv.amount) {
+    return `<td class="urv-inv-cell urv-inv-empty" data-id="${item.id}" data-idx="${idx}">+ add invoice</td>`;
+  }
+  const cfLabel = inv.cfDate ? fmtDate(inv.cfDate) : `<span class="urv-cf-unset">— assign CF date —</span>`;
+  return `<td class="urv-inv-cell" data-id="${item.id}" data-idx="${idx}">
+    <div class="urv-inv-amt">${fmtMoney(inv.amount)}</div>
+    <div class="urv-inv-dates">Inv: ${inv.invoiceDate ? fmtDate(inv.invoiceDate) : "—"} · CF: ${cfLabel}</div>
+  </td>`;
+}
+
+function renderUnbilledRevenueSections(store, period) {
+  const { state } = store;
+  const host = document.getElementById("urv-sections");
+  if (!host) return;
+  const list = state.unbilledRevenue || [];
+
+  host.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => {
+    const items = list.filter((i) => i.section === sec.id && i.status !== "deleted");
+    const sectionTotal = sum(items.map((i) => unbilledRevenueItemTotal(i)));
+    const rows = items.map((item) => `
+      <tr data-id="${item.id}">
+        <td><span class="urv-name-text" data-id="${item.id}">${escapeHtml(item.name)}</span></td>
+        ${[0, 1, 2].map((idx) => urvInvoiceCell(item, idx)).join("")}
+        <td class="num">${fmtMoney(unbilledRevenueItemTotal(item))}</td>
+        <td><button type="button" class="mini-btn urv-delete" data-id="${item.id}" title="Delete this line item">🗑</button></td>
+      </tr>`).join("");
+
+    return `
+      <div class="panel urv-section">
+        <div class="fixed-group-head">
+          <h3>${escapeHtml(sec.label)} <span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span></h3>
+          <span class="total">${fmtMoney(sectionTotal)}</span>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table urv-table">
+            <thead><tr><th>Name</th><th>Invoice 1</th><th>Invoice 2</th><th>Invoice 3</th><th class="num">Total</th><th></th></tr></thead>
+            <tbody>${rows || `<tr><td colspan="6" class="meta" style="padding:14px;">No line items yet.</td></tr>`}</tbody>
+          </table>
+        </div>
+        <div style="padding:12px 16px;"><button type="button" class="btn-ghost urv-add-item" data-section="${sec.id}">+ Add Line Item</button></div>
+      </div>`;
+  }).join("");
+
+  host.querySelectorAll(".urv-inv-cell").forEach((td) => {
+    td.addEventListener("click", () => openUrvInvoiceModal(store, td.dataset.id, Number(td.dataset.idx)));
+  });
+  host.querySelectorAll(".urv-name-text").forEach((span) => {
+    span.addEventListener("click", () => openUrvRenameModal(store, span.dataset.id));
+  });
+  host.querySelectorAll(".urv-delete").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!confirm("Delete this line item? This can't be undone.")) return;
+      store.mutate((s) => {
+        recordTombstone(s, "unbilledRevenue", btn.dataset.id);
+        s.unbilledRevenue = s.unbilledRevenue.filter((i) => i.id !== btn.dataset.id);
+      });
+    });
+  });
+  host.querySelectorAll(".urv-add-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      store.mutate((s) => {
+        s.unbilledRevenue = s.unbilledRevenue || [];
+        const item = makeUnbilledRevenueItem(btn.dataset.section, "New line item");
+        item.source = "manual"; item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
+        s.unbilledRevenue.push(item);
+      });
+    });
+  });
+}
+
+function openUrvRenameModal(store, itemId) {
+  const item = store.state.unbilledRevenue.find((i) => i.id === itemId);
+  if (!item) return;
+  openModal(`
+    <button type="button" class="modal-close-x" id="urn-close">✕</button>
+    <h3>Rename Line Item</h3>
+    <div class="row"><label>Name</label><input id="urn-name" value="${escapeHtml(item.name)}" /></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="urn-cancel">Cancel</button>
+      <button class="btn-primary" id="urn-save" style="width:auto;">Save</button>
+    </div>
+  `, {
+    onMount: (host) => {
+      host.querySelector("#urn-close").onclick = closeModal;
+      host.querySelector("#urn-cancel").onclick = closeModal;
+      host.querySelector("#urn-save").onclick = () => {
+        const name = host.querySelector("#urn-name").value.trim();
+        if (!name) { toast("Name is required", "error"); return; }
+        store.mutate((s) => {
+          const it = s.unbilledRevenue.find((i) => i.id === itemId);
+          it.name = name; it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString();
+        });
+        closeModal();
+      };
+    },
+  });
+}
+
+function openUrvInvoiceModal(store, itemId, idx) {
+  const item = store.state.unbilledRevenue.find((i) => i.id === itemId);
+  if (!item) return;
+  const inv = item.invoices[idx] || blankInvoice();
+  openModal(`
+    <button type="button" class="modal-close-x" id="uri-close">✕</button>
+    <h3>Invoice ${idx + 1} — ${escapeHtml(item.name)}</h3>
+    <div class="row"><label>Amount</label><input id="uri-amount" type="number" step="0.01" value="${inv.amount || ""}" placeholder="0.00" /></div>
+    <div class="row"><label>Invoice Date</label><input id="uri-invdate" type="date" value="${inv.invoiceDate || ""}" /></div>
+    <div class="row"><label>CF Date</label><input id="uri-cfdate" type="date" value="${inv.cfDate || ""}" /></div>
+    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">A CF date is what makes this invoice flow into Receivables Collected on CF Forecast. Leave it blank until you're ready to schedule it.</div>
+    <div class="modal-actions">
+      ${inv.amount ? `<button class="btn-ghost" id="uri-clear">Clear</button>` : ""}
+      <button class="btn-ghost" id="uri-cancel">Cancel</button>
+      <button class="btn-primary" id="uri-save" style="width:auto;">Save</button>
+    </div>
+  `, {
+    onMount: (host) => {
+      host.querySelector("#uri-close").onclick = closeModal;
+      host.querySelector("#uri-cancel").onclick = closeModal;
+      host.querySelector("#uri-clear")?.addEventListener("click", () => {
+        store.mutate((s) => {
+          const it = s.unbilledRevenue.find((i) => i.id === itemId);
+          it.invoices[idx] = blankInvoice();
+          it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString();
+        });
+        closeModal();
+      });
+      host.querySelector("#uri-save").onclick = () => {
+        const amount = parseFloat(host.querySelector("#uri-amount").value || "0");
+        const invoiceDate = host.querySelector("#uri-invdate").value || null;
+        const cfDate = host.querySelector("#uri-cfdate").value || null;
+        store.mutate((s) => {
+          const it = s.unbilledRevenue.find((i) => i.id === itemId);
+          it.invoices[idx] = { amount: Math.round((amount || 0) * 100) / 100, invoiceDate, cfDate };
+          it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString();
+        });
+        closeModal();
+      };
+    },
+  });
 }
 
 function renderUnbilledRows(store, period) {
@@ -1743,7 +1897,7 @@ const apSelected = new Set();
 export function renderPayables(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
-  const weeks = periodWeeks(period);
+  const weeks = periodWeeks(period).slice(0, cfViewWeeks);
 
   const openList = state.payables.filter((p) => p.status === "open");
   const totalAP = openList.reduce((a, p) => a + p.balance, 0);
@@ -1845,7 +1999,7 @@ function openTopVendorsModal(openList) {
 
 function renderAPRows(store, period) {
   const { state } = store;
-  const weeks = periodWeeks(period);
+  const weeks = periodWeeks(period).slice(0, cfViewWeeks);
   let list = state.payables;
   if (apFilter === "open") list = list.filter((p) => p.status === "open");
   if (apFilter === "scheduled") list = list.filter((p) => p.status === "open" && effectivePayableDate(state, period, p));

@@ -124,6 +124,10 @@
     </nav>
 
     <div class="topbar-right">
+      <div class="weeks-toggle-group" id="weeks-toggle-group" title="Every forecast is 13 weeks — this just controls how many are shown">
+        <button type="button" class="weeks-toggle-btn" data-weeks="6">6 Week</button>
+        <button type="button" class="weeks-toggle-btn" data-weeks="13">13 Week</button>
+      </div>
       <div class="sync-pill" id="sync-pill" title="Click to sync now"><span class="sync-dot"></span><span id="sync-label">connecting…</span></div>
       <div class="user-badge"><span class="user-dot" id="user-initial">N</span><span id="user-name">Nick</span><span class="role-tag" id="role-tag" style="display:none;">view only</span></div>
       <button class="btn-brass" id="btn-save-version">Save Version</button>
@@ -168,7 +172,6 @@
           <div class="page-head-actions">
             <select class="period-select" id="account-select"></select>
             <select class="period-select" id="period-select"></select>
-            <select class="period-select" id="weeks-view-select" title="How many of the 13 weeks to show"></select>
             <button class="btn-ghost" id="btn-roll-forward" title="Drop the completed week, shift everything up, and open a new week at the end">⟳ Roll Forward</button>
           </div>
         </div>
@@ -280,6 +283,15 @@
           <tbody id="ub-tbody"></tbody>
         </table>
       </div>
+
+      <div class="page-head" style="margin-top:28px;">
+        <div>
+          <div class="eyebrow">Unbilled Revenue</div>
+          <h2>Unbilled Revenue</h2>
+          <div class="meta">Fixed Price Backlog · T&amp;M · Frontlog · Small Jobs · WIP · Other — each line item can carry up to 3 invoices, one CF date assignment flows straight into Receivables Collected</div>
+        </div>
+      </div>
+      <div id="urv-sections"></div>
     </section>
 
     <!-- ===================== PAYABLES ===================== -->

@@ -27,6 +27,174 @@ export function accountName(id) {
   return ACCOUNTS.find((a) => a.id === id)?.name || id;
 }
 
+// The 6 Unbilled Revenue sections — a completely separate structure from the
+// existing Unbilled AR (project revenue forecast) list.
+export const UNBILLED_REVENUE_SECTIONS = [
+  { id: "fixedPriceBacklog", label: "Fixed Price Revenue Backlog" },
+  { id: "tm", label: "T&M Projections" },
+  { id: "frontlog", label: "High Dollar, High Probability Frontlog" },
+  { id: "smallQuickJobs", label: "Small, Quick Jobs" },
+  { id: "wip", label: "WIP" },
+  { id: "other", label: "Other" },
+];
+
+export function blankInvoice() { return { amount: 0, invoiceDate: null, cfDate: null }; }
+export function makeUnbilledRevenueItem(section, name, invoices = []) {
+  const slots = [blankInvoice(), blankInvoice(), blankInvoice()];
+  invoices.forEach((inv, i) => { if (i < 3 && inv) slots[i] = { amount: inv.amount || 0, invoiceDate: inv.invoiceDate || null, cfDate: inv.cfDate || null }; });
+  return { id: uid("urv"), section, name, invoices: slots, status: "open", lastEditBy: "import", updatedAt: new Date().toISOString(), source: "import" };
+}
+
+// Total of an item's 3 invoice slots.
+export function unbilledRevenueItemTotal(item) {
+  return (item.invoices || []).reduce((a, inv) => a + (inv.amount || 0), 0);
+}
+
+// One-time seed from the Q4 2026 Revenue Forecast Breakdown (Sept 29, 2026
+// cycle) and the Sept WIP roll — every section's total here was cross-checked
+// against the source document's own stated totals before being hardcoded.
+// Oct/Nov/Dec invoice dates are end-of-month; WIP items are seeded with no
+// invoice date yet, per the user's request to assign those by hand.
+export function seedUnbilledRevenue() {
+  const items = [];
+  const OCT = "2026-10-31", NOV = "2026-11-30", DEC = "2026-12-31";
+  const inv = (amt, date) => (amt ? { amount: amt, invoiceDate: date, cfDate: null } : null);
+  const addMonthly = (section, name, oct, nov, dec) => {
+    items.push(makeUnbilledRevenueItem(section, name, [inv(oct, OCT), inv(nov, NOV), inv(dec, DEC)]));
+  };
+
+  // 1. Fixed Price Revenue Backlog — 45 projects (Oct/Nov/Dec totals verified
+  // against the PDF's stated $1,495,244 / $1,260,238 / $561,401)
+  const fpb = [
+    ["23-044 QTS — QTS - SLC1", 26388, 30403, 26388],
+    ["24-002.154 Floor & Decor — Floor & Decor - N. Oklahoma City (Edmond), OK", 1405, 0, 0],
+    ["24-004.12 POH+W Architects Ltd. — CarMax Lake Charles, LA", 0, 0, 0],
+    ["24-023 QTS — QTS Cedar Rapids, IA", 61686, 64274, 57242],
+    ["24-023.18 QTS — 6th Ave. SW & Edgewood Rd. SW Intersection Imp, Cedar Rapids", 11964, 11964, 0],
+    ["24-023.19 QTS — CDR1 – Wright Bros Intersection Improvements", 4185, 1046, 0],
+    ["24-042 St. Tammany Parish Procurement — Tammany Trace Bridge #7", 6075, 93806, 93806],
+    ["24-067 Corgan — DFW2-DAS114", 14073, 14073, 14073],
+    ["24-098 POH+W Architects Ltd. — Carmax Waco,TX", 800, 800, 1542],
+    ["25-040 Copeland and Johns — UPS New Orleans Expansion", 722, 722, 0],
+    ["25-075 CarMax — CarMax-Uxbridge, MA", 6221, 8271, 8271],
+    ["25-078.4 CarMax — Site Entitlements", 5519, 5519, 5519],
+    ["25-086 QTS — QTS - Turkey, TX", 0, 0, 0],
+    ["25-086.1 QTS — QTS-WTX1-CAMPUS, Hall County, TX - Turkey, TX Civil Design", 23686, 26486, 23686],
+    ["25-086.2 QTS — QTS Turkey, TX - Phase 2 - Mass Grading", 37482, 61168, 26486],
+    ["25-086.12 QTS — WTX1 Offsite Road Improvements", 16529, 0, 0],
+    ["25-093 CarMax — CarMax-Riverview,FL", 28555, 8566, 5711],
+    ["25-100 CarMax — Carmax Wayne, NJ expansion", 0, 0, 0],
+    ["25-105 Corgan — DAS114 (DC-5, DC-6, DC-7, and DC-8)", 28090, 21205, 38075],
+    ["25-109 MG2 — EDGED Monroe Campus", 7209, 7209, 7209],
+    ["25-110 MG2 — EDGED Mobile Campus (Pritchard)", 0, 0, 0],
+    ["26-009 Digital Engineering — Parish Line Pump Station Improvements Phase 2", 52000, 13000, 13000],
+    ["26-011 QTS — Mason City, IA Data Center", 156111, 232877, 95806],
+    ["26-018 Corgan — QTS-DFW2 Corner Site - Wilmer, TX", 0, 0, 0],
+    ["26-029 QTS — QTS-SLC1 Expansion Campus Campus Planning Eagle Mountain, UT", 0, 1600, 0],
+    ["26-031 CarMax — CarMax-Brownsville, TX", 0, 0, 0],
+    ["26-038 Blue Whale Development — 7 Brew - 3209 Johnson Street - Subwork", 308, 308, 0],
+    ["26-039 Flavored Operations, LLC — 7 Brew - Sulphur, LA - 212 S. Cities", 8502, 17285, 10161],
+    ["26-060 Rosehill Construction — Brookwood - Highway 44, Gonzales, LA", 6423, 22009, 7503],
+    ["26-068 Basic Systems, Inc. — Southern Star McNew Compressor Station", 0, 56843, 56843],
+    ["26-069 Corgan — QTS - DFW3 - Lancaster, TX", 0, 0, 0],
+    ["26-070 QII — QII-Fort Bend Parkway, Houston, TX", 0, 0, 0],
+    ["26-091 QTS — US Hwy 67, Johnson County, TX", 95432, 0, 0],
+    ["26-093 Corgan — SLC2 Campus Plan - DC1-DC2 Civil Construction Drawings", 74062, 76692, 26099],
+    ["26-093.1 QTS — SLC1 Expansion, SLC2 Phase 1, and SLC Phase 2 Offsite Infrastructure Improvements", 371215, 121607, 38504],
+    ["26-093.2 QTS — SLC1 Expansion Phase 1 scope", 38608, 19304, 0],
+    ["26-094 Diamond Z Engineering, Inc. — FedEx Parking Lot Expansion", 6212, 1538, 0],
+    ["26-095 Oracle — ABI01 – Entry Enhancement Civil Design - Hrly up to $95K", 0, 0, 0],
+    ["26-103 Laitram, LLC — Professional Civil Engineering and Land Surveying Services 5400 Jefferson Hwy", 5560, 3520, 0],
+    ["26-112 Neo Infrastructure — 1544 & 1556 Tchoupitoulas Street New Orleans, LA 70130", 1500, 0, 0],
+    ["26-116 Kohl's Department Stores, Inc. — Land Surveying services for the Seven Brew in Lafayette, LA.", 0, 1840, 490],
+    ["26-118 QTS — Pre Dev. DD-Additional 380 Acres-Eagle Mountain", 50347, 26110, 1388],
+    ["26-119 QII — Due Diligence and Site Investigation Approximate 2037 Acre Parcel Salco Road Church", 261975, 295375, 3600],
+    ["22006 J Caldarera Company — LA Trace Subdivision Lot Study", 86400, 0, 0],
+    ["24003 JP Department of PW — Seven Oaks - US 90 Street Lighting", 0, 14818, 0],
+  ];
+  for (const [name, o, n, d] of fpb) addMonthly("fixedPriceBacklog", name, o, n, d);
+
+  // 2. T&M Projections — verified against $53,000 / $55,000 / $55,000
+  addMonthly("tm", "6012-40 Digital Engineering — JP Sewer", 27000, 27000, 27000);
+  addMonthly("tm", "Meyer projects", 6000, 8000, 8000);
+  addMonthly("tm", "Other Jefferson Parish projects", 20000, 20000, 20000);
+
+  // 3. High Dollar, High Probability Frontlog — "File# - Client — Project"
+  // merged into one name field per the user's instruction. Verified against
+  // $225,864 / $386,756 / $646,756 (off by $2 in Nov/Dec vs the PDF, a
+  // rounding artifact in the source's own % × fee math, not a transcription error).
+  // Rows with no probability/%-complete assigned yet import at $0 across all
+  // 3 months, ready to fill in, per instruction.
+  addMonthly("frontlog", "26M-160 - GreenSpace Ventures — Savanna Data & Power Campus, Carroll County", 0, 0, 0);
+  addMonthly("frontlog", "26M-149 - QTS Data Centers — Hylton, WV DD", 0, 0, 0);
+  addMonthly("frontlog", "26M-157 - Basic Systems, Inc. — EGT&S Oakleaf Centre Addition", 0, 16672, 16672);
+  addMonthly("frontlog", "26M-158 - Basic Systems, Inc. — EGT&S Oakleaf Finnefrock Station", 0, 18232, 18232);
+  addMonthly("frontlog", "26M-159 - Basic Systems, Inc. — EGT&S Oakleaf Perulak Station", 0, 16770, 16770);
+  addMonthly("frontlog", "26M-168 - Waskey Bridges, Inc. — WhiteWater Midstream Thrasher Meter Station", 0, 0, 80000);
+  addMonthly("frontlog", "26M-175 - QTS Data Centers — Walnut Cove, NC DD", 14963, 29926, 29926);
+  addMonthly("frontlog", "26M-176 - QTS Data Centers — Pima County, AZ DD", 0, 0, 0);
+  addMonthly("frontlog", "26M-162 - Beale Infrastructure — Muskogee County, Oklahoma", 0, 0, 0);
+  addMonthly("frontlog", "26M-182 - QTS Data Centers — Knightdale, NC DD", 31457, 62914, 62914);
+  addMonthly("frontlog", "26M-184 - Oracle Cloud Infrastructure — OCI – Stage 1 Desktop Due Diligence", 0, 0, 0);
+  addMonthly("frontlog", "26M-178 - QTS Data Centers — Millard County DD", 47444, 94888, 94888);
+  addMonthly("frontlog", "26M-179 - Woodward Design Group — Surgery Center at 3100 Metairie Road", 0, 0, 0);
+  addMonthly("frontlog", "26M-185 - JRE Management — Pineville, LA 7brew", 0, 5981, 5981);
+  addMonthly("frontlog", "26M-188 - Kalcon — Luzerne County, PA", 0, 0, 0);
+  addMonthly("frontlog", "26M-189 - Frischertz — CPG Data Center", 0, 0, 180000);
+  addMonthly("frontlog", "26M-191 - Floor & Decor — Dallas", 0, 9371, 9371);
+  addMonthly("frontlog", "No # yet - QTS Data Centers — Cedar Proposal – kicked off", 132000, 132000, 132000);
+
+  // 4. Small, Quick Jobs — verified against $50,000 / $50,000 / $50,000
+  addMonthly("smallQuickJobs", "Small, Quick Jobs", 50000, 50000, 50000);
+
+  // 5. WIP — project #, customer and name merged into one field; a single
+  // unbilled-revenue amount as of end of September, no invoice date assigned
+  // yet (the user will plug in invoice date + CF date by hand). Verified
+  // against the WIP table's stated total, $4,510,000.20.
+  const wip = [
+    ["24-067 Corgan — DFW2-DAS114", 10650],
+    ["25-105 Corgan — DAS114(DC5,6,7,8)", 5000],
+    ["26-069 Corgan — DWF3 -Lancaster", 119050],
+    ["26-093 Corgan — SLC2 Campus Plan", 889433],
+    ["3011 JP — JP-Harvey Lighting", 13053],
+    ["5008 JP — JP-Ames", 60375],
+    ["20001 JP — JP-Stumpf", 45281],
+    ["25-109 MG2 — EDGED Monroe Campus", 7209],
+    ["26-092 QII — TX Hwy 89", 4500],
+    ["26-117 QII — I-44 & US Route 66, Villa Ridge", 4500],
+    ["25-086.1 QTS — Turkey P1", 2091309.50],
+    ["26-093.1 QTS — SLC", 914780.70],
+    ["26-093.2 QTS — SLC1 Expansion P1", 328164],
+    ["26-118 QTS — Eagle Mountain Pre Dev DD - Additional 380", 16695],
+  ];
+  for (const [name, amt] of wip) {
+    items.push(makeUnbilledRevenueItem("wip", name, [{ amount: amt, invoiceDate: null, cfDate: null }]));
+  }
+
+  // 6. Other — the Q4 Summary's "Other" line, verified against $75,000 / $200,000 / $400,000
+  addMonthly("other", "Other", 75000, 200000, 400000);
+
+  return items;
+}
+
+// Every invoice slot across every unbilled-revenue item that has a CF date
+// assigned, feeding into Receivables Collected on CF Forecast — same
+// contract as receivables/unbilledReceivables: only counts once a CF date
+// is actually set, which here the user assigns by hand per the request.
+export function unbilledRevenueOccurrencesInPeriod(state, period) {
+  const out = []; // { wi, amount, itemId, section, name, invoiceIdx }
+  for (const item of state.unbilledRevenue || []) {
+    if (item.status !== "open") continue;
+    (item.invoices || []).forEach((inv, idx) => {
+      if (!inv.cfDate || !inv.amount) return;
+      const wi = weekIndexForDate(period, inv.cfDate);
+      if (wi === null) return;
+      out.push({ wi, amount: inv.amount, itemId: item.id, section: item.section, name: item.name, invoiceIdx: idx });
+    });
+  }
+  return out;
+}
+
 // Fills in the new multi-account fields on a period that predates this
 // feature, without touching anything it already has.
 export function migratePeriod(period) {
@@ -38,6 +206,7 @@ export function migratePeriod(period) {
   if (!period.pcK401) period.pcK401 = { amount: 0, weeks: [] };
   if (!period.pcOtherOutflow) period.pcOtherOutflow = {};
   if (!period.basinSavingsDistributions) period.basinSavingsDistributions = {};
+  if (!period.projectedAP) period.projectedAP = {};
   if (period.payroll && !period.payroll.weekAmounts) period.payroll.weekAmounts = {};
   if (period.k401 && !period.k401.weekAmounts) period.k401.weekAmounts = {};
   if (period.pcPayroll && !period.pcPayroll.weekAmounts) period.pcPayroll.weekAmounts = {};
@@ -108,12 +277,19 @@ export function defaultState() {
     // Records deletions ({ [listKey]: { [id]: deletedAtISO } }) so that when two
     // people's edits get merged, a deleted item doesn't silently reappear just
     // because the other copy being merged in is older and still has it.
-    tombstones: { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {} },
+    tombstones: { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {}, unbilledRevenue: {} },
     arAsOfDate: null, // "as of" date pulled from the most recent Aged AR import's report header
     apAsOfDate: null,
     // Manual inter-company transfers — { id, fromAccount, toAccount, amount, date, note, source:'manual', lastEditBy, updatedAt }.
     // Recurring transfers are set up on a Fixed Payment instead (transferFrom/transferTo fields).
     transfers: [],
+    // Unbilled Revenue — a completely separate structure from unbilledReceivables,
+    // organized into 6 fixed sections. Each line item can carry up to 3 invoices
+    // (amount + invoice date + a CF date the user assigns), one per month of the
+    // 13-week window. A CF date is what makes an invoice flow into Receivables
+    // Collected on CF Forecast — until then it sits here unscheduled.
+    // { id, section, name, invoices:[{amount,invoiceDate,cfDate}×3], lastEditBy, updatedAt, source }
+    unbilledRevenue: [],
   };
 }
 
@@ -167,6 +343,7 @@ export function makePeriod(id, label, startISO) {
     },
 
     basinSavingsDistributions: {}, // { [weekIndex]: { v, by, at } } — manual outflow, same override shape as everything else
+    projectedAP: {}, // { [weekIndex]: { v, by, at } } — manual estimate for AP you don't have actual invoices for yet
   };
 }
 
@@ -525,6 +702,9 @@ export function computeForecast(state, period) {
     if (wi === null) continue;
     scheduledReceivables[wi] += (u.originalBalance ?? u.balance);
   }
+  for (const occ of unbilledRevenueOccurrencesInPeriod(state, period)) {
+    scheduledReceivables[occ.wi] += occ.amount;
+  }
   for (const p of state.payables) {
     const eff = effectivePayableDate(state, period, p);
     const wi = p.status === "paid" ? weekIndexForDateStrict(period, eff) : weekIndexForDate(period, eff);
@@ -578,8 +758,9 @@ export function computeForecast(state, period) {
     }
 
     const apPayables = -scheduledPayables[wi]; // always computed from Payables' CF dates — not manually overridable
+    const projectedAP = readOv(period.projectedAP?.[wi]) ?? 0; // manual estimate, for AP you don't have actual invoices for yet
     const interCompanyOut = -ic.outflowByWeek[wi];
-    const totalOutflows = manualTotal + fixedTotal + apPayables + interCompanyOut;
+    const totalOutflows = manualTotal + fixedTotal + apPayables + projectedAP + interCompanyOut;
 
     const netCashflow = totalInflows + totalOutflows;
     const locDraw = readOv(ov.locDraw?.[wi]) ?? 0;
@@ -590,7 +771,7 @@ export function computeForecast(state, period) {
       otherInflows, interCompanyIn, interCompanyItems: ic.itemsByWeek[wi], totalInflows,
       manualOutflows, manualTotal,
       fixedRows, fixedTotal,
-      apPayables, apScheduled: -scheduledPayables[wi],
+      apPayables, apScheduled: -scheduledPayables[wi], projectedAP,
       interCompanyOut,
       totalOutflows, netCashflow, locDraw,
     };
@@ -625,6 +806,7 @@ export function computeForecast(state, period) {
     fixedRows: Object.fromEntries(fixedCategories.map((c) => [c, sum(rows.map((r) => r.fixedRows[c]))])),
     fixedTotal: sum(rows.map((r) => r.fixedTotal)),
     apPayables: sum(rows.map((r) => r.apPayables)),
+    projectedAP: sum(rows.map((r) => r.projectedAP)),
     totalOutflows: sum(rows.map((r) => r.totalOutflows)),
     netCashflow: sum(rows.map((r) => r.netCashflow)),
     locDraw: sum(rows.map((r) => r.locDraw)),
