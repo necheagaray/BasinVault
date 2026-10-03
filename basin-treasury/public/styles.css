@@ -463,11 +463,10 @@ select.period-select{
 .cf-hover-week{ font-family:var(--font-mono); font-size:11px; color:var(--brass-bright); font-weight:700; margin-right:4px; }
 .cf-combo-wrap .urv-sparkline{ height:170px; overflow:visible; }
 .cf-combo-zero{ stroke:var(--line-bright); stroke-width:1; stroke-dasharray:2,3; }
-.cf-bar-in{ fill:var(--green); opacity:0.85; rx:2; }
-.cf-bar-out{ fill:var(--red); opacity:0.85; rx:2; }
-.cf-net-line{ fill:none; stroke:var(--brass-bright); stroke-width:2.5; filter:drop-shadow(0 0 3px rgba(230,195,126,0.5)); }
-.cf-net-dot{ r:3.5; fill:var(--brass-bright); stroke:var(--bg-panel); stroke-width:1.5; transition:r .1s; }
-.cf-net-dot.active{ r:5.5; }
+.cf-net-bar{ rx:3; transition:opacity .15s, filter .15s; opacity:0.88; }
+.cf-net-bar-pos{ fill:var(--green); }
+.cf-net-bar-neg{ fill:var(--red); }
+.cf-net-bar.active{ opacity:1; filter:brightness(1.25); }
 
 /* ===================== CF FORECAST GRID ===================== */
 .cf-table-wrap{

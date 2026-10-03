@@ -274,6 +274,9 @@ export function defaultState() {
     fixedPayments: [],
     customerAutoSchedule: {}, // { [customerName]: { days:number, auto:boolean } } — shared by Existing AR and Unbilled AR
     vendorAutoSchedule: {},
+    // Pay When Paid memory — keyed by vendor+invoice#, survives Clear All +
+    // re-import on both Payables and Receivables. { [pwpKey]: { receivableKey, kind:'ar'|'unbilled' } }
+    pwpMemory: {},
     // Records deletions ({ [listKey]: { [id]: deletedAtISO } }) so that when two
     // people's edits get merged, a deleted item doesn't silently reappear just
     // because the other copy being merged in is older and still has it.
@@ -643,6 +646,55 @@ export function interestForAccount(state, period, accountId) {
     if (wi !== null) perWeek[wi] += amount;
   }
   return { perWeek, amount };
+}
+
+// Normalizes a (name, number) pair into a stable lookup key — trimmed,
+// lowercased, so minor formatting differences between imports don't break
+// the match.
+function pwpKeyOf(a, b) {
+  return `${(a || "").trim().toLowerCase()}::${(b || "").trim().toLowerCase()}`;
+}
+
+// Remembers (or forgets) which receivable a payable's Pay When Paid link
+// points at, keyed by vendor+invoice# — not by id, since both sides get
+// fresh random ids on every re-import. Call this whenever a payable's PWP
+// link changes by hand, so the next Clear All + re-import can restore it.
+export function recordPwpMemory(state, payable, receivable) {
+  if (!payable.vendor || !payable.docNumber) return;
+  state.pwpMemory = state.pwpMemory || {};
+  const pKey = pwpKeyOf(payable.vendor, payable.docNumber);
+  if (!receivable) { delete state.pwpMemory[pKey]; return; }
+  const kind = payable.linkedReceivableKind === "unbilled" ? "unbilled" : "ar";
+  const receivableNumber = kind === "unbilled" ? receivable.projectNumber : receivable.docNumber;
+  state.pwpMemory[pKey] = { receivableKey: pwpKeyOf(receivable.customer, receivableNumber), kind };
+}
+
+// Re-applies remembered PWP links to any payable that doesn't already have
+// one — called after importing either Aged AP or a receivables source, since
+// whichever side completes the pair should trigger the match.
+export function applyPwpMemory(state) {
+  const memory = state.pwpMemory || {};
+  if (!Object.keys(memory).length) return 0;
+  let applied = 0;
+  for (const p of state.payables) {
+    if (p.status !== "open" || p.payWhenPaid) continue; // already set — a stored memory should never clobber a deliberate manual choice
+    if (!p.vendor || !p.docNumber) continue;
+    const mem = memory[pwpKeyOf(p.vendor, p.docNumber)];
+    if (!mem) continue;
+    const list = mem.kind === "unbilled" ? (state.unbilledReceivables || []) : state.receivables;
+    const match = list.find((r) => {
+      if (r.status !== "open") return false;
+      const num = mem.kind === "unbilled" ? r.projectNumber : r.docNumber;
+      return pwpKeyOf(r.customer, num) === mem.receivableKey;
+    });
+    if (match) {
+      p.payWhenPaid = true;
+      p.linkedReceivableId = match.id;
+      p.linkedReceivableKind = mem.kind;
+      applied++;
+    }
+  }
+  return applied;
 }
 
 // "Pay when paid" — a payable's CF date is derived from the next pay run after
@@ -1026,6 +1078,7 @@ export function mergeStates(local, remote) {
 
   merged.customerAutoSchedule = { ...remote.customerAutoSchedule, ...local.customerAutoSchedule };
   merged.vendorAutoSchedule = { ...remote.vendorAutoSchedule, ...local.vendorAutoSchedule };
+  merged.pwpMemory = { ...remote.pwpMemory, ...local.pwpMemory };
   merged.manualOutflowCategories = Array.from(new Set([...(remote.manualOutflowCategories || []), ...(local.manualOutflowCategories || [])]));
   merged.activePeriodId = local.activePeriodId || remote.activePeriodId;
 
@@ -1097,7 +1150,11 @@ export function mergeAgingImport(state, kind, parsed) {
     if (!state[schedKey][g]) state[schedKey][g] = { days: 30, auto: false };
   }
 
-  return { added, updated, paidOff };
+  // whichever side just imported might complete a previously-recorded PWP
+  // pairing whose other half is already sitting in state from an earlier import
+  const pwpApplied = applyPwpMemory(state);
+
+  return { added, updated, paidOff, pwpApplied };
 }
 
 // Creates Unbilled Receivable lines from reviewed import specs — one call per

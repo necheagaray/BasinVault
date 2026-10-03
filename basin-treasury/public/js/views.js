@@ -3,7 +3,7 @@ import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor, weekAmountFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone, interestForAccount,
-  UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice, unbilledRevenueOccurrencesInPeriod,
+  UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice, unbilledRevenueOccurrencesInPeriod, recordPwpMemory,
   ACCOUNTS, accountName, computeForecastForAccount, computeSimpleAccountForecast,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
@@ -461,47 +461,37 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
 
 // Combined Inflow/Outflow/Net chart — three series sharing one set of axes
 // and a zero-line, so they read as one visual rather than three separate charts.
-function cfComboBarLineSVG(weeklyInflow, weeklyOutflow, weeklyNet, weeksMeta, chartId, opts = {}) {
+// One bar per week — Net cashflow only. Green above the zero-line when
+// positive, red below when negative. Nothing else competing for attention;
+// hover reveals the Inflow/Outflow split behind that week's number.
+function cfNetBarChartSVG(weeklyInflow, weeklyOutflow, weeklyNet, weeksMeta, chartId, opts = {}) {
   const W = opts.W || 900, H = opts.H || 190, padX = opts.padX ?? 18, padY = opts.padY ?? 16;
-  const n = weeklyInflow.length;
-  // Bars (inflow/outflow) share one symmetric scale — true magnitude, not
-  // squashed flat — and the net line rides the SAME scale on purpose: net is
-  // literally inflow minus outflow, so seeing it on the same axis is what
-  // makes the relationship between the three actually readable.
-  const maxMag = Math.max(...weeklyInflow, ...weeklyOutflow.map(Math.abs), ...weeklyNet.map(Math.abs), 1);
+  const n = weeklyNet.length;
+  const maxMag = Math.max(...weeklyNet.map(Math.abs), 1);
   const lo = -maxMag, hi = maxMag, range = hi - lo;
   const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
   const yFor = (v) => H - padY - ((v - lo) / range) * (H - padY * 2);
   const zeroY = yFor(0);
-  const barW = Math.max(6, Math.min(26, stepX * 0.5));
+  const barW = Math.max(10, Math.min(44, stepX * 0.6));
 
   const weekLabel = (i) => weeksMeta[i] ? `Week of ${fmtDateShort(weeksMeta[i].start)}` : `Week ${i + 1}`;
 
-  const bars = weeklyInflow.map((inflow, i) => {
+  const bars = weeklyNet.map((net, i) => {
     const x = padX + i * stepX;
-    const outflow = Math.abs(weeklyOutflow[i]);
-    const inY = yFor(inflow), outY = yFor(-outflow);
-    return `
-      <rect x="${(x - barW / 2).toFixed(1)}" y="${Math.min(inY, zeroY).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, Math.abs(zeroY - inY)).toFixed(1)}" class="cf-bar-in" data-idx="${i}"/>
-      <rect x="${(x - barW / 2).toFixed(1)}" y="${Math.min(outY, zeroY).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, Math.abs(zeroY - outY)).toFixed(1)}" class="cf-bar-out" data-idx="${i}"/>
-    `;
+    const y = yFor(net);
+    const cls = net >= 0 ? "cf-net-bar-pos" : "cf-net-bar-neg";
+    return `<rect x="${(x - barW / 2).toFixed(1)}" y="${Math.min(y, zeroY).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, Math.abs(zeroY - y)).toFixed(1)}" class="cf-net-bar ${cls}" data-idx="${i}"/>`;
   }).join("");
-
-  const netPoints = weeklyNet.map((v, i) => ({ x: padX + i * stepX, y: yFor(v), v, i }));
-  const netPath = netPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const netDots = netPoints.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" class="cf-net-dot" data-idx="${p.i}"/>`).join("");
 
   const html = `<div class="urv-chart-wrap cf-combo-wrap" data-chart="${chartId}">
     <svg viewBox="0 0 ${W} ${H}" class="urv-sparkline cf-combo-svg" preserveAspectRatio="none">
       <line x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${W - padX}" y2="${zeroY.toFixed(1)}" class="cf-combo-zero"/>
       ${bars}
-      <path d="${netPath}" class="cf-net-line"/>
-      ${netDots}
       <line class="urv-chart-vline" x1="0" y1="${padY - 4}" x2="0" y2="${H - padY}"/>
       <rect class="urv-chart-hitbox" x="0" y="0" width="${W}" height="${H}" data-chart="${chartId}"/>
     </svg>
   </div>`;
-  const points = weeklyInflow.map((inflow, i) => ({ i, inflow, outflow: weeklyOutflow[i], net: weeklyNet[i], x: padX + i * stepX, label: weekLabel(i) }));
+  const points = weeklyNet.map((net, i) => ({ i, inflow: weeklyInflow[i], outflow: weeklyOutflow[i], net, x: padX + i * stepX, label: weekLabel(i) }));
   return { html, W, H, points };
 }
 
@@ -523,7 +513,7 @@ function wireCfComboHover(host, chartId, points, W, infoElId, compact) {
     const svgX = ((clientX - rect.left) / rect.width) * W;
     let nearest = points[0], minDist = Infinity;
     for (const p of points) { const d = Math.abs(p.x - svgX); if (d < minDist) { minDist = d; nearest = p; } }
-    svg.querySelectorAll(".cf-net-dot").forEach((d) => d.classList.toggle("active", Number(d.dataset.idx) === nearest.i));
+    svg.querySelectorAll(".cf-net-bar").forEach((b) => b.classList.toggle("active", Number(b.dataset.idx) === nearest.i));
     vline.setAttribute("x1", nearest.x); vline.setAttribute("x2", nearest.x);
     vline.style.display = "block";
     infoEl.innerHTML = `<span class="cf-hover-week">${escapeHtml(nearest.label)}</span>
@@ -532,7 +522,7 @@ function wireCfComboHover(host, chartId, points, W, infoElId, compact) {
       <span class="cf-combo-legend-item"><span class="dot" style="background:var(--brass-bright);"></span>Net <b class="${nearest.net >= 0 ? "green" : "red"}">${fmt(nearest.net)}</b></span>`;
   };
   const hide = () => {
-    svg.querySelectorAll(".cf-net-dot").forEach((d) => d.classList.remove("active"));
+    svg.querySelectorAll(".cf-net-bar").forEach((b) => b.classList.remove("active"));
     vline.style.display = "none";
     infoEl.innerHTML = defaultHtml;
   };
@@ -606,7 +596,7 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals) {
   const miniChart = (values, key, fromZero) => urvSparklineSVG(values, weeksMeta, `${chartPrefix}-${key}`, { W: 150, H: 36, padX: 3, padY: 4, fromZero });
 
   const closeChart = miniChart(weekly.closing, "close", false);
-  const comboChart = cfComboBarLineSVG(weekly.inflow, weekly.outflow, weekly.net, weeksMeta, `${chartPrefix}-combo`, { W: 620, H: 170, padX: 14, padY: 14 });
+  const comboChart = cfNetBarChartSVG(weekly.inflow, weekly.outflow, weekly.net, weeksMeta, `${chartPrefix}-combo`, { W: 620, H: 170, padX: 14, padY: 14 });
   const legendId = `${chartPrefix}-combo-legend`;
 
   const distTotal = sum(weekly.distribution || []);
@@ -2367,7 +2357,10 @@ function renderAPRows(store, period) {
       store.mutate((s) => {
         const item = s.payables.find((x) => x.id === id);
         item.payWhenPaid = e.target.checked;
-        if (!e.target.checked) { item.linkedReceivableId = null; item.linkedReceivableKind = null; item.payDateOverride = null; }
+        if (!e.target.checked) {
+          item.linkedReceivableId = null; item.linkedReceivableKind = null; item.payDateOverride = null;
+          recordPwpMemory(s, item, null); // unchecking clears the remembered link too
+        }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });
@@ -2377,6 +2370,12 @@ function renderAPRows(store, period) {
         const item = s.payables.find((x) => x.id === id);
         item.linkedReceivableId = recId || null;
         item.linkedReceivableKind = kind === "unbilled" ? "unbilled" : "ar";
+        if (recId) {
+          const list = item.linkedReceivableKind === "unbilled" ? (s.unbilledReceivables || []) : s.receivables;
+          recordPwpMemory(s, item, list.find((r) => r.id === recId) || null);
+        } else {
+          recordPwpMemory(s, item, null);
+        }
         item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
       });
     });

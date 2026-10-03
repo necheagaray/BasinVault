@@ -152,6 +152,7 @@ const Store = {
       if (!this.state.unbilledReceivables) this.state.unbilledReceivables = [];
       if (!this.state.transfers) this.state.transfers = [];
       if (!this.state.unbilledRevenue) this.state.unbilledRevenue = [];
+      if (!this.state.pwpMemory) this.state.pwpMemory = {};
       if (!this.state.tombstones) this.state.tombstones = { receivables: {}, payables: {}, fixedPayments: {}, unbilledReceivables: {}, transfers: {}, unbilledRevenue: {} };
       if (!this.state.tombstones.transfers) this.state.tombstones.transfers = {};
       if (!this.state.tombstones.unbilledRevenue) this.state.tombstones.unbilledRevenue = {};
@@ -235,6 +236,7 @@ async function boot() {
     if (!remote.tombstones.transfers) remote.tombstones.transfers = {};
     if (!remote.tombstones.unbilledRevenue) remote.tombstones.unbilledRevenue = {};
     if (!remote.unbilledRevenue) { remote.unbilledRevenue = seedUnbilledRevenue(); }
+    if (!remote.pwpMemory) remote.pwpMemory = {};
     remote.periods.forEach((p) => migratePeriod(p));
     migrateTransfersToStateLevel(remote);
     Store.state = remote;
