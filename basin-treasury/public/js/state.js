@@ -1,4 +1,4 @@
-import { uid, toISO, parseISO, addDays, todayISO } from "./util.js";
+import { uid, toISO, parseISO, addDays, todayISO, sum } from "./util.js";
 
 export const WEEKS_PER_PERIOD = 13;
 export const DEFAULT_OUTFLOW_CATEGORIES = ["Distributions", "Credit Card", "Sales Tax", "Other"];
@@ -818,7 +818,7 @@ export function computeForecast(state, period) {
   return { weeks: rows, totals, fixedCategories };
 }
 
-function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
+
 
 // Simplified weekly cash flow for the 4 accounts besides Basin Checking — each
 // has a much smaller, fixed set of line items (no Aged AR/AP-scale detail),

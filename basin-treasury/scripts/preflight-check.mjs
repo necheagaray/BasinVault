@@ -12,7 +12,7 @@
 // Usage: node scripts/preflight-check.mjs
 // Exits non-zero (and prints exactly what's wrong) if anything fails.
 
-import { readFileSync, readdirSync } from "fs";
+import { readFileSync, readdirSync, writeFileSync, unlinkSync } from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -157,6 +157,44 @@ try {
   ok("boot's exact migration sequence + a full forecast computation both run clean against old-shaped data");
 } catch (e) {
   fail(`migration smoke test threw: ${e.stack || e.message}`);
+}
+
+// ---------- 6. Combined single-file bundle — checked under real module-parsing rules ----------
+// This exists because of a second real incident: state.js and views.js each
+// independently defined their own local `sum()` helper. node --check on a
+// plain .js file (classic-script parsing) silently allows two top-level
+// function declarations with the same name — but the single-file build ships
+// as <script type="module">, where that is a hard SyntaxError, and it only
+// surfaced when actually loaded in a browser. A classic-script check can
+// never catch this; only checking under genuine module-parsing rules (the
+// .mjs extension forces that in Node, matching the browser) can.
+console.log("\n=== 6. Combined bundle — module-parsing check (catches the duplicate-sum bug's root cause) ===");
+try {
+  const stripImports = (text) => text.replace(/^import[\s\S]*?;\s*\n/gm, "");
+  const stripExports = (text) => text.replace(/^export (function|const|async function|let)/gm, "$1");
+  const read = (f) => readFileSync(path.join(jsDir, f), "utf8");
+  const apiNs = "const api = { getToken, getUser, setSession, clearSession, login, fetchState, saveState, fetchHistory, fetchSnapshot };";
+  const combined = [
+    stripExports(read("util.js")),
+    stripExports(read("api.js")),
+    apiNs,
+    stripExports(stripImports(read("state.js"))),
+    stripExports(stripImports(read("parser.js"))),
+    stripExports(stripImports(read("views.js"))),
+    stripImports(read("main.js")),
+  ].join("\n");
+  const tmpFile = path.join(root, "scripts", ".preflight-bundle-check.mjs");
+  writeFileSync(tmpFile, combined);
+  try {
+    execSync(`node --check "${tmpFile}"`, { stdio: "pipe" });
+    ok("combined bundle parses cleanly as a real ES module (no duplicate top-level declarations)");
+  } catch (e) {
+    fail(`the combined single-file bundle has a module-parsing error that would crash in the browser:\n${e.stderr?.toString() || e.message}`);
+  } finally {
+    unlinkSync(tmpFile);
+  }
+} catch (e) {
+  fail(`combined bundle check itself threw: ${e.stack || e.message}`);
 }
 
 // ---------- Summary ----------

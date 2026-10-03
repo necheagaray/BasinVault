@@ -13,6 +13,18 @@ export function fmtMoney(n, { signed = false, cents = false } = {}) {
   return out;
 }
 
+// Compact format for dense displays — rounds to the nearest $10,000 first,
+// then shows as $550k or $2.25M.
+export function sum(arr) { return arr.reduce((a, b) => a + b, 0); }
+
+export function fmtMoneyCompact(n) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  const neg = n < 0;
+  const rounded = Math.round(Math.abs(n) / 10000) * 10000;
+  const out = rounded >= 1000000 ? `$${(rounded / 1000000).toFixed(2)}M` : `$${Math.round(rounded / 1000)}k`;
+  return neg ? `-${out}` : out;
+}
+
 export function fmtDate(d) {
   if (!d) return "—";
   const dt = typeof d === "string" ? parseISO(d) : d;

@@ -204,7 +204,7 @@ function bootPreview() {
 }
 
 async function boot() {
-  if (location.protocol === "file:") return bootPreview();
+  if (window.__BASIN_PREVIEW_BUILD__ === true) return bootPreview();
   const user = api.getUser();
   if (!api.getToken() || !user) return showLogin();
 
