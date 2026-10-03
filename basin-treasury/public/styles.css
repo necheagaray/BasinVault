@@ -372,6 +372,11 @@ select.period-select{
   background:var(--bg-panel-alt); color:var(--text-hi); border:1px solid var(--line);
   border-radius:var(--radius-sm); padding:7px 10px; font-size:12.5px; font-family:var(--font-mono);
 }
+.period-label{
+  background:var(--bg-panel-alt); color:var(--text-hi); border:1px solid var(--line);
+  border-radius:var(--radius-sm); padding:7px 10px; font-size:12.5px; font-family:var(--font-mono);
+  display:inline-flex; align-items:center; cursor:default;
+}
 
 /* panel / card */
 .panel{
@@ -450,25 +455,19 @@ select.period-select{
 .kpi-card.sc-net .urv-chart-line{ stroke:var(--brass); } .kpi-card.sc-net .urv-chart-dot{ fill:var(--brass); }
 .kpi-card.sc-close .urv-chart-line{ stroke:var(--brass-bright); } .kpi-card.sc-close .urv-chart-dot{ fill:var(--brass-bright); }
 
-.cf-combo-card{ grid-column:span 2; min-width:320px; }
-.cf-combo-legend{ display:flex; gap:18px; flex-wrap:wrap; position:relative; z-index:1; margin-bottom:8px; }
-.cf-combo-legend-item{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text-dim); font-family:var(--font-mono); }
-.cf-combo-legend-item .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; }
-.cf-combo-legend-item b{ font-size:14px; margin-left:1px; }
-.cf-combo-wrap .urv-sparkline{ height:96px; }
+.cf-combo-card{ grid-column:1 / -1; min-height:240px; }
+.cf-combo-legend{ display:flex; gap:22px; flex-wrap:wrap; align-items:center; position:relative; z-index:1; margin-bottom:12px; min-height:20px; }
+.cf-combo-legend-item{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-dim); font-family:var(--font-mono); }
+.cf-combo-legend-item .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; flex-shrink:0; }
+.cf-combo-legend-item b{ font-size:15px; margin-left:1px; }
+.cf-hover-week{ font-family:var(--font-mono); font-size:11px; color:var(--brass-bright); font-weight:700; margin-right:4px; }
+.cf-combo-wrap .urv-sparkline{ height:170px; overflow:visible; }
 .cf-combo-zero{ stroke:var(--line-bright); stroke-width:1; stroke-dasharray:2,3; }
-.cf-combo-line{ fill:none; stroke-width:2; }
-.cf-combo-line.cf-combo-in{ stroke:var(--green); }
-.cf-combo-line.cf-combo-out{ stroke:var(--red); }
-.cf-combo-line.cf-combo-net{ stroke:var(--brass-bright); }
-.cf-combo-dot{ r:2.5; transition:r .1s; pointer-events:none; }
-.cf-combo-dot[data-series="in"]{ fill:var(--green); }
-.cf-combo-dot[data-series="out"]{ fill:var(--red); }
-.cf-combo-dot[data-series="net"]{ fill:var(--brass-bright); }
-.cf-combo-dot.active{ r:4.5; }
-.cf-combo-tooltip{ white-space:normal; text-align:left; line-height:1.5; }
-.cf-combo-tooltip-head{ font-weight:700; color:var(--brass-bright); margin-bottom:2px; }
-@media (max-width:860px){ .cf-combo-card{ grid-column:1 / -1; } }
+.cf-bar-in{ fill:var(--green); opacity:0.85; rx:2; }
+.cf-bar-out{ fill:var(--red); opacity:0.85; rx:2; }
+.cf-net-line{ fill:none; stroke:var(--brass-bright); stroke-width:2.5; filter:drop-shadow(0 0 3px rgba(230,195,126,0.5)); }
+.cf-net-dot{ r:3.5; fill:var(--brass-bright); stroke:var(--bg-panel); stroke-width:1.5; transition:r .1s; }
+.cf-net-dot.active{ r:5.5; }
 
 /* ===================== CF FORECAST GRID ===================== */
 .cf-table-wrap{
@@ -1049,6 +1048,8 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .home-combined-figures .value{ font-size:20px; font-weight:800; color:var(--text-hi); }
 .home-combined-figures .value.brass{ color:var(--brass-bright); text-shadow:0 0 14px rgba(230,195,126,0.35); }
 .home-combined-card .urv-sparkline{ height:150px; position:relative; z-index:1; }
+.urv-axis-gridline{ stroke:rgba(255,255,255,0.08); stroke-width:1; }
+.urv-axis-label{ font-family:var(--font-mono); font-size:10px; fill:var(--text-dim); }
 .home-combined-card .urv-chart-line{ stroke-width:2.5; }
 .home-combined-card .urv-chart-dot{ r:4; }
 .home-combined-card .urv-chart-dot.active{ r:6.5; }
@@ -1135,14 +1136,25 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   content:""; position:absolute; left:0; bottom:-1px; width:34px; height:2px;
   background:var(--brass-bright); box-shadow:0 0 8px var(--brass-bright);
 }
-.account-card-figures{ display:grid; grid-template-columns:1fr; gap:9px; margin-bottom:12px; flex:1; }
-.account-card-figures > div{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
-.account-card-figures .label{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); }
-.as-of-date{ text-transform:none; letter-spacing:0; opacity:0.75; font-style:italic; margin-left:4px; }
-.account-card-figures .value{ font-family:var(--font-mono); font-size:16px; font-weight:700; color:var(--text-hi); text-shadow:0 0 14px rgba(255,255,255,0.08); }
-.account-card-figures .value.green{ color:var(--green); text-shadow:0 0 16px rgba(79,214,148,0.35); }
-.account-card-figures .value.red{ color:var(--red); text-shadow:0 0 16px rgba(239,111,92,0.3); }
-.account-card-figures .value.brass{ color:var(--brass-bright); text-shadow:0 0 18px rgba(230,195,126,0.4); }
+.account-card-figures-row{ display:flex; gap:14px; margin-bottom:10px; }
+.acf-item{ flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.acf-item .label{
+  font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim);
+  display:flex; flex-direction:column; gap:1px; white-space:nowrap;
+}
+.as-of-date{ text-transform:none; letter-spacing:0; opacity:0.65; font-style:italic; font-size:9px; }
+.acf-item .value{
+  font-family:var(--font-mono); font-size:16px; font-weight:700; color:var(--text-hi); text-shadow:0 0 14px rgba(255,255,255,0.08);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.acf-item .value.green{ color:var(--green); text-shadow:0 0 16px rgba(79,214,148,0.35); }
+.acf-item .value.red{ color:var(--red); text-shadow:0 0 16px rgba(239,111,92,0.3); }
+.acf-item .value.brass{ color:var(--brass-bright); text-shadow:0 0 18px rgba(230,195,126,0.4); }
+
+.account-card-chart{ flex:1; display:flex; align-items:center; margin-bottom:10px; min-height:40px; }
+.account-card-chart .urv-sparkline{ height:50px; width:100%; display:block; }
+.account-card-chart .urv-chart-tooltip{ font-size:10px; padding:3px 7px; }
+
 .account-card-cta{
   font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--brass);
   border-top:1px solid var(--line); padding-top:11px; margin-top:auto;
@@ -1152,14 +1164,17 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 
 /* Basin Checking keeps its "main" prominence but is no longer full-width */
 .layout-basin-checking .account-card-name{ font-size:23px; }
-.layout-basin-checking .account-card-figures .value{ font-size:19px; }
+.layout-basin-checking .acf-item .value{ font-size:19px; }
+.layout-basin-checking .account-card-chart .urv-sparkline{ height:60px; }
 
-/* EB Savings — off to the side, deliberately smaller/quieter */
+/* EB Savings — narrow column, figures wrap instead of cramming 3 across */
 .layout-eb-savings{ padding:16px 18px; }
 .layout-eb-savings .account-card-name{ font-size:14px; margin-bottom:10px; padding-bottom:9px; }
-.layout-eb-savings .account-card-figures{ gap:10px; }
-.layout-eb-savings .account-card-figures .label{ font-size:9px; }
-.layout-eb-savings .account-card-figures .value{ font-size:13px; }
+.layout-eb-savings .account-card-figures-row{ flex-wrap:wrap; gap:8px 16px; }
+.layout-eb-savings .acf-item{ flex:1 1 40%; }
+.layout-eb-savings .acf-item .label{ font-size:8.5px; }
+.layout-eb-savings .acf-item .value{ font-size:12.5px; }
+.layout-eb-savings .account-card-chart .urv-sparkline{ height:40px; }
 .layout-eb-savings .account-card-cta{ font-size:10px; padding-top:8px; }
 
 /* ===================== VAULT INTERIOR — applied to every tab for a cohesive feel ===================== */

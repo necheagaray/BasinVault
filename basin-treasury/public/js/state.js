@@ -17,9 +17,9 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // is untouched by any of this; everything below is additive.
 export const ACCOUNTS = [
   { id: "basin-checking", name: "Basin Checking", isMain: true },
+  { id: "basin-savings", name: "Basin Savings", isMain: false },
   { id: "pc-checking", name: "P&C Checking", isMain: false },
   { id: "pc-savings", name: "P&C Savings", isMain: false },
-  { id: "basin-savings", name: "Basin Savings", isMain: false },
   { id: "eb-savings", name: "EB Savings", isMain: false },
 ];
 

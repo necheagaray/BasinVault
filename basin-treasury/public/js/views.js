@@ -379,7 +379,13 @@ function sliceTotals(weeks) {
 // can't carry JS listeners, and native per-dot <title> tooltips require a
 // precise hover directly on a tiny circle, which is what this replaces).
 function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
-  const W = opts.W || 280, H = opts.H || 72, padX = opts.padX ?? 8, padY = opts.padY ?? 10;
+  const showAxes = !!opts.showAxes;
+  // extra room reserved for the $1M gridline labels (left) and month labels (bottom)
+  const axisPadLeft = showAxes ? 48 : 0;
+  const axisPadBottom = showAxes ? 18 : 0;
+  const W = opts.W || 280, H = opts.H || 72;
+  const padX = (opts.padX ?? 8) + axisPadLeft, padY = opts.padY ?? 10;
+  const plotBottom = H - padY - axisPadBottom;
   const n = values.length;
   // fromZero:false scales min-to-max instead of 0-to-max — matters for large,
   // relatively stable balances, where scaling from zero would flatten real
@@ -387,7 +393,7 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
   const lo = opts.fromZero === false ? Math.min(...values) : 0;
   const hi = Math.max(...values, lo + 1); // avoid divide-by-zero when flat
   const range = hi - lo;
-  const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
+  const stepX = n > 1 ? (W - padX - (opts.padX ?? 8)) / (n - 1) : 0;
   // opts.annotations: [{ wi, amount, label }] — e.g. a distribution that
   // week. Rendered as a small downward marker under that point, and folded
   // into the hover tooltip so it's unmistakably an outflow pulling the
@@ -397,13 +403,13 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
   const fmt = opts.compact ? fmtMoneyCompact : fmtMoney;
   const points = values.map((v, i) => ({
     x: padX + i * stepX,
-    y: H - padY - ((v - lo) / range) * (H - padY * 2),
+    y: plotBottom - ((v - lo) / range) * (plotBottom - padY),
     v, i,
     label: weeksMeta[i] ? `Week of ${fmtDateShort(weeksMeta[i].start)}` : `Week ${i + 1}`,
     annotation: annByWi[i] || null,
   }));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const baseline = H - padY;
+  const baseline = plotBottom;
   const areaD = `${pathD} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
   const dots = points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="urv-chart-dot" data-idx="${p.i}"/>`).join("");
   const markers = points.filter((p) => p.annotation).map((p) => `
@@ -411,14 +417,42 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
       <circle r="7" class="urv-outflow-marker-bg"/>
       <path d="M-2.5,-2.5 L0,2.5 L2.5,-2.5" class="urv-outflow-marker-arrow"/>
     </g>`).join("");
+
+  // $1M gridlines on the left, month markers along the bottom — opt-in only.
+  let axesHtml = "";
+  if (showAxes) {
+    const STEP = 1000000;
+    const gridLines = [];
+    const firstLine = Math.ceil(lo / STEP) * STEP;
+    for (let v = firstLine; v <= hi; v += STEP) {
+      const y = plotBottom - ((v - lo) / range) * (plotBottom - padY);
+      gridLines.push(`
+        <line x1="${padX}" y1="${y.toFixed(1)}" x2="${W - (opts.padX ?? 8)}" y2="${y.toFixed(1)}" class="urv-axis-gridline"/>
+        <text x="${(padX - 8).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="urv-axis-label">$${Math.round(v / 1000000)}M</text>`);
+    }
+    const monthLabels = points.filter((p, i) => {
+      const wk = weeksMeta[i];
+      if (!wk) return false;
+      const d = parseISO(wk.start);
+      const prevWk = weeksMeta[i - 1];
+      return i === 0 || (prevWk && parseISO(prevWk.start).getMonth() !== d.getMonth());
+    }).map((p) => {
+      const d = parseISO(weeksMeta[p.i].start);
+      const label = d.toLocaleDateString("en-US", { month: "short" });
+      return `<text x="${p.x.toFixed(1)}" y="${(plotBottom + 13).toFixed(1)}" text-anchor="middle" class="urv-axis-label">${label}</text>`;
+    }).join("");
+    axesHtml = `<g class="urv-axes">${gridLines.join("")}${monthLabels}</g>`;
+  }
+
   const html = `<div class="urv-chart-wrap" data-chart="${chartId}">
     <svg viewBox="0 0 ${W} ${H}" class="urv-sparkline" preserveAspectRatio="none">
+      ${axesHtml}
       <path d="${areaD}" class="urv-chart-area"/>
       <path d="${pathD}" class="urv-chart-line"/>
       <line class="urv-chart-vline" x1="0" y1="${padY - 4}" x2="0" y2="${baseline}"/>
       ${dots}
       ${markers}
-      <rect class="urv-chart-hitbox" x="0" y="0" width="${W}" height="${H}" data-chart="${chartId}"/>
+      <rect class="urv-chart-hitbox" x="${padX - (opts.padX ?? 8)}" y="0" width="${W - padX + (opts.padX ?? 8)}" height="${H}" data-chart="${chartId}"/>
     </svg>
     <div class="urv-chart-tooltip" id="urv-tooltip-${chartId}"></div>
   </div>`;
@@ -427,70 +461,80 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
 
 // Combined Inflow/Outflow/Net chart — three series sharing one set of axes
 // and a zero-line, so they read as one visual rather than three separate charts.
-function cfComboLineSVG(series, weeksMeta, chartId, opts = {}) {
-  const W = opts.W || 900, H = opts.H || 150, padX = opts.padX ?? 16, padY = opts.padY ?? 14;
-  const n = weeksMeta.length;
-  const allValues = series.flatMap((s) => s.values);
-  const lo = Math.min(0, ...allValues);
-  const hi = Math.max(0, ...allValues, lo + 1);
-  const range = hi - lo;
+function cfComboBarLineSVG(weeklyInflow, weeklyOutflow, weeklyNet, weeksMeta, chartId, opts = {}) {
+  const W = opts.W || 900, H = opts.H || 190, padX = opts.padX ?? 18, padY = opts.padY ?? 16;
+  const n = weeklyInflow.length;
+  // Bars (inflow/outflow) share one symmetric scale — true magnitude, not
+  // squashed flat — and the net line rides the SAME scale on purpose: net is
+  // literally inflow minus outflow, so seeing it on the same axis is what
+  // makes the relationship between the three actually readable.
+  const maxMag = Math.max(...weeklyInflow, ...weeklyOutflow.map(Math.abs), ...weeklyNet.map(Math.abs), 1);
+  const lo = -maxMag, hi = maxMag, range = hi - lo;
   const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
   const yFor = (v) => H - padY - ((v - lo) / range) * (H - padY * 2);
   const zeroY = yFor(0);
+  const barW = Math.max(6, Math.min(26, stepX * 0.5));
 
-  const seriesData = series.map((s) => {
-    const points = s.values.map((v, i) => ({
-      x: padX + i * stepX, y: yFor(v), v, i,
-      label: weeksMeta[i] ? `Week of ${fmtDateShort(weeksMeta[i].start)}` : `Week ${i + 1}`,
-    }));
-    const d = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-    const dots = points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="cf-combo-dot" data-series="${s.key}" data-idx="${p.i}"/>`).join("");
-    return { key: s.key, label: s.label, color: s.color, points, pathHtml: `<path d="${d}" class="cf-combo-line cf-combo-${s.key}"/>${dots}` };
-  });
+  const weekLabel = (i) => weeksMeta[i] ? `Week of ${fmtDateShort(weeksMeta[i].start)}` : `Week ${i + 1}`;
+
+  const bars = weeklyInflow.map((inflow, i) => {
+    const x = padX + i * stepX;
+    const outflow = Math.abs(weeklyOutflow[i]);
+    const inY = yFor(inflow), outY = yFor(-outflow);
+    return `
+      <rect x="${(x - barW / 2).toFixed(1)}" y="${Math.min(inY, zeroY).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, Math.abs(zeroY - inY)).toFixed(1)}" class="cf-bar-in" data-idx="${i}"/>
+      <rect x="${(x - barW / 2).toFixed(1)}" y="${Math.min(outY, zeroY).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, Math.abs(zeroY - outY)).toFixed(1)}" class="cf-bar-out" data-idx="${i}"/>
+    `;
+  }).join("");
+
+  const netPoints = weeklyNet.map((v, i) => ({ x: padX + i * stepX, y: yFor(v), v, i }));
+  const netPath = netPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const netDots = netPoints.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" class="cf-net-dot" data-idx="${p.i}"/>`).join("");
 
   const html = `<div class="urv-chart-wrap cf-combo-wrap" data-chart="${chartId}">
     <svg viewBox="0 0 ${W} ${H}" class="urv-sparkline cf-combo-svg" preserveAspectRatio="none">
       <line x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${W - padX}" y2="${zeroY.toFixed(1)}" class="cf-combo-zero"/>
-      ${seriesData.map((s) => s.pathHtml).join("")}
+      ${bars}
+      <path d="${netPath}" class="cf-net-line"/>
+      ${netDots}
       <line class="urv-chart-vline" x1="0" y1="${padY - 4}" x2="0" y2="${H - padY}"/>
       <rect class="urv-chart-hitbox" x="0" y="0" width="${W}" height="${H}" data-chart="${chartId}"/>
     </svg>
-    <div class="urv-chart-tooltip cf-combo-tooltip" id="urv-tooltip-${chartId}"></div>
   </div>`;
-  return { html, W, H, seriesData };
+  const points = weeklyInflow.map((inflow, i) => ({ i, inflow, outflow: weeklyOutflow[i], net: weeklyNet[i], x: padX + i * stepX, label: weekLabel(i) }));
+  return { html, W, H, points };
 }
 
-// Hover wiring for the combo chart — shows all series' values for the
-// nearest week at once, not just a single number.
-function wireCfComboHover(host, chartId, seriesData, W, compact) {
+// Hover wiring — updates a FIXED info readout (never clips or overlaps,
+// unlike a tooltip that follows the cursor) with all three values for
+// whichever week is nearest the cursor.
+function wireCfComboHover(host, chartId, points, W, infoElId, compact) {
   const wrap = host.querySelector(`.urv-chart-wrap[data-chart="${chartId}"]`);
-  if (!wrap) return;
+  const infoEl = document.getElementById(infoElId);
+  if (!wrap || !infoEl) return;
   const svg = wrap.querySelector(".urv-sparkline");
   const hitbox = wrap.querySelector(".urv-chart-hitbox");
   const vline = wrap.querySelector(".urv-chart-vline");
-  const tooltip = wrap.querySelector(`#urv-tooltip-${chartId}`);
   const fmt = compact ? fmtMoneyCompact : fmtMoney;
-  const points0 = seriesData[0]?.points || [];
+  const defaultHtml = infoEl.innerHTML;
 
   const showNearest = (clientX) => {
     const rect = svg.getBoundingClientRect();
     const svgX = ((clientX - rect.left) / rect.width) * W;
-    let nearestIdx = 0, minDist = Infinity;
-    points0.forEach((p) => { const d = Math.abs(p.x - svgX); if (d < minDist) { minDist = d; nearestIdx = p.i; } });
-    svg.querySelectorAll(".cf-combo-dot").forEach((d) => d.classList.toggle("active", Number(d.dataset.idx) === nearestIdx));
-    const nearestX = points0[nearestIdx]?.x ?? 0;
-    vline.setAttribute("x1", nearestX); vline.setAttribute("x2", nearestX);
+    let nearest = points[0], minDist = Infinity;
+    for (const p of points) { const d = Math.abs(p.x - svgX); if (d < minDist) { minDist = d; nearest = p; } }
+    svg.querySelectorAll(".cf-net-dot").forEach((d) => d.classList.toggle("active", Number(d.dataset.idx) === nearest.i));
+    vline.setAttribute("x1", nearest.x); vline.setAttribute("x2", nearest.x);
     vline.style.display = "block";
-    const label = points0[nearestIdx]?.label || "";
-    const parts = seriesData.map((s) => `${s.label}: ${fmt(s.points[nearestIdx]?.v ?? 0)}`);
-    tooltip.innerHTML = `<div class="cf-combo-tooltip-head">${escapeHtml(label)}</div>${parts.map((p) => `<div>${escapeHtml(p)}</div>`).join("")}`;
-    tooltip.style.left = `${(nearestX / W) * 100}%`;
-    tooltip.style.display = "block";
+    infoEl.innerHTML = `<span class="cf-hover-week">${escapeHtml(nearest.label)}</span>
+      <span class="cf-combo-legend-item"><span class="dot" style="background:var(--green);"></span>In <b class="green">${fmt(nearest.inflow)}</b></span>
+      <span class="cf-combo-legend-item"><span class="dot" style="background:var(--red);"></span>Out <b class="red">${fmt(nearest.outflow)}</b></span>
+      <span class="cf-combo-legend-item"><span class="dot" style="background:var(--brass-bright);"></span>Net <b class="${nearest.net >= 0 ? "green" : "red"}">${fmt(nearest.net)}</b></span>`;
   };
   const hide = () => {
-    svg.querySelectorAll(".cf-combo-dot").forEach((d) => d.classList.remove("active"));
+    svg.querySelectorAll(".cf-net-dot").forEach((d) => d.classList.remove("active"));
     vline.style.display = "none";
-    tooltip.style.display = "none";
+    infoEl.innerHTML = defaultHtml;
   };
   hitbox.addEventListener("mousemove", (e) => showNearest(e.clientX));
   hitbox.addEventListener("mouseleave", hide);
@@ -562,11 +606,8 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals) {
   const miniChart = (values, key, fromZero) => urvSparklineSVG(values, weeksMeta, `${chartPrefix}-${key}`, { W: 150, H: 36, padX: 3, padY: 4, fromZero });
 
   const closeChart = miniChart(weekly.closing, "close", false);
-  const comboChart = cfComboLineSVG([
-    { key: "in", label: "Inflow", color: "var(--green)", values: weekly.inflow },
-    { key: "out", label: "Outflow", color: "var(--red)", values: weekly.outflow },
-    { key: "net", label: "Net", color: "var(--brass-bright)", values: weekly.net },
-  ], weeksMeta, `${chartPrefix}-combo`, { W: 460, H: 96, padX: 10, padY: 10 });
+  const comboChart = cfComboBarLineSVG(weekly.inflow, weekly.outflow, weekly.net, weeksMeta, `${chartPrefix}-combo`, { W: 620, H: 170, padX: 14, padY: 14 });
+  const legendId = `${chartPrefix}-combo-legend`;
 
   const distTotal = sum(weekly.distribution || []);
   const distChart = miniChart((weekly.distribution || []).map((v) => Math.abs(v)), "dist", true);
@@ -577,7 +618,7 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals) {
       <div class="kpi-body"><div class="label">Opening Cash</div><div class="value">${fmtMoney(totals.opening)}</div></div>
     </div>
     <div class="stat-card kpi-card cf-combo-card">
-      <div class="cf-combo-legend">
+      <div class="cf-combo-legend" id="${legendId}">
         <span class="cf-combo-legend-item"><span class="dot" style="background:var(--green);"></span>Inflows <b class="green">${fmtMoney(totals.inflow)}</b></span>
         <span class="cf-combo-legend-item"><span class="dot" style="background:var(--red);"></span>Outflows <b class="red">${fmtMoney(totals.outflow)}</b></span>
         <span class="cf-combo-legend-item"><span class="dot" style="background:var(--brass-bright);"></span>Net <b class="${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</b></span>
@@ -595,7 +636,7 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals) {
       <div class="kpi-mini-chart">${distChart.html}</div>
     </div>
   `;
-  wireCfComboHover(host, `${chartPrefix}-combo`, comboChart.seriesData, comboChart.W);
+  wireCfComboHover(host, `${chartPrefix}-combo`, comboChart.points, comboChart.W, legendId, true);
   wireUrvChartHover(host, `${chartPrefix}-close`, closeChart.points, closeChart.W);
   wireUrvChartHover(host, `${chartPrefix}-dist`, distChart.points, distChart.W);
 }
@@ -725,6 +766,7 @@ function renderSimpleAccountForecast(store, period, accountId) {
 export function renderHome(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
+  const weeksMetaForChart = periodWeeks(period).slice(0, cfViewWeeks);
   document.getElementById("home-meta").textContent = `${period.label} · ${cfViewWeeks}-week view · Starts ${fmtDate(period.startDate)}`;
 
   document.querySelectorAll(".weeks-toggle-btn").forEach((b) => b.classList.toggle("active", Number(b.dataset.weeks) === cfViewWeeks));
@@ -752,7 +794,6 @@ export function renderHome(store) {
     const combinedOpening = sum(perAccountWeeks.map((w) => w[0]?.opening || 0));
     const closingNow = combinedClosing[combinedClosing.length - 1] || combinedOpening;
     const netChange = closingNow - combinedOpening;
-    const weeksMetaForChart = periodWeeks(period).slice(0, cfViewWeeks);
 
     // Distributions pull the combined balance down — mark them explicitly as
     // outflows on the chart rather than letting them just look like a dip.
@@ -763,7 +804,7 @@ export function renderHome(store) {
     }
 
     const chart = urvSparklineSVG(combinedClosing, weeksMetaForChart, "home-combined", {
-      W: 900, H: 150, padX: 14, padY: 14, fromZero: false, compact: true, annotations: distributionAnnotations,
+      W: 900, H: 150, padX: 14, padY: 14, fromZero: false, compact: true, annotations: distributionAnnotations, showAxes: true,
     });
 
     combinedHost.innerHTML = `
@@ -784,20 +825,26 @@ export function renderHome(store) {
     wireUrvChartHover(combinedHost, "home-combined", chart.points, chart.W, { compact: true });
   }
 
+  const cardCharts = []; // wired up after the whole grid's innerHTML is set
   const cardHtml = (acct, extraClass = "") => {
     const calc = calcFor(acct.id);
     const netTotal = calc.totals.netCashflow;
     const openingDate = calc.weeks[0]?.week?.start;
     const closingDate = calc.weeks[calc.weeks.length - 1]?.week?.end;
+    const chartId = `home-acct-${acct.id}`;
+    const weeklyClosing = calc.weeks.map((w) => w.closing);
+    const chart = urvSparklineSVG(weeklyClosing, weeksMetaForChart, chartId, { W: 280, H: 50, padX: 2, padY: 6, fromZero: false, compact: true });
+    cardCharts.push({ chartId, points: chart.points, W: chart.W });
     return `
       <div class="panel account-card ${acct.isMain ? "main-account" : ""} ${extraClass}" data-account="${acct.id}" role="button" tabindex="0" style="grid-area:${acct.id};">
         ${acct.isMain ? `<div class="main-account-badge">★ MAIN OPERATING ACCOUNT</div>` : ""}
         <div class="account-card-name">${escapeHtml(acct.name)}</div>
-        <div class="account-card-figures">
-          <div><div class="label">Opening ${openingDate ? `<span class="as-of-date">as of ${fmtDateShort(openingDate)}</span>` : ""}</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
-          <div><div class="label">Net Change</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal, { signed: true })}</div></div>
-          <div><div class="label">Closing (End of ${cfViewWeeks}-Week View) ${closingDate ? `<span class="as-of-date">as of ${fmtDateShort(closingDate)}</span>` : ""}</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+        <div class="account-card-figures-row">
+          <div class="acf-item"><div class="label">Opening<span class="as-of-date">${openingDate ? fmtDateShort(openingDate) : ""}</span></div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
+          <div class="acf-item"><div class="label">Net Change</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal, { signed: true })}</div></div>
+          <div class="acf-item"><div class="label">Closing<span class="as-of-date">${closingDate ? fmtDateShort(closingDate) : ""}</span></div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
         </div>
+        <div class="account-card-chart">${chart.html}</div>
         <div class="account-card-cta">View ${escapeHtml(acct.name)} Forecast ▸</div>
       </div>`;
   };
@@ -822,6 +869,8 @@ export function renderHome(store) {
     });
     card.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") card.click(); });
   });
+  const accountsHost = document.getElementById("home-accounts");
+  for (const c of cardCharts) wireUrvChartHover(accountsHost, c.chartId, c.points, c.W, { compact: true });
 
   renderHomeSummaries(store, period);
 }
@@ -905,9 +954,8 @@ export function renderForecast(store) {
   acctSel.innerHTML = ACCOUNTS.map((a) => `<option value="${a.id}" ${a.id === selectedAccountId ? "selected" : ""}>${a.isMain ? "★ " : ""}${escapeHtml(a.name)}${a.isMain ? " (Main)" : ""}</option>`).join("");
   acctSel.onchange = () => { selectedAccountId = acctSel.value; store.render(); };
 
-  const sel = document.getElementById("period-select");
-  sel.innerHTML = state.periods.map((p) => `<option value="${p.id}" ${p.id === period.id ? "selected" : ""}>${escapeHtml(p.label)}</option>`).join("");
-  sel.onchange = () => { state.activePeriodId = sel.value; store.render(); };
+  const periodLabelEl = document.getElementById("period-label");
+  if (periodLabelEl) periodLabelEl.textContent = period.label;
 
   document.getElementById("btn-roll-forward").onclick = () => openRollForwardModal(store, period, computeForecast(state, period), weeksMetaFull);
 
