@@ -448,6 +448,39 @@ select.period-select{
 }
 .kpi-body{ position:relative; z-index:1; }
 .kpi-mini-chart{ margin-top:auto; padding-top:10px; position:relative; z-index:1; }
+
+/* weekly cash-movement bars — green up, red down */
+.cm-bar-zero{ stroke:var(--line-bright); stroke-width:1; stroke-dasharray:1.5,2.5; }
+.cm-bar{ rx:1.5; opacity:0.85; transition:opacity .15s, filter .15s; }
+.cm-bar-pos{ fill:var(--green); }
+.cm-bar-neg{ fill:var(--red); }
+.cm-bar.active{ opacity:1; filter:brightness(1.3); }
+
+/* click-to-expand affordance on any chart wrapped as a button */
+button.chart-expand-btn{
+  all:unset; display:block; width:100%; cursor:pointer; position:relative;
+  border-radius:var(--radius-sm); transition:background .15s;
+}
+button.chart-expand-btn:hover{ background:rgba(230,195,126,0.07); }
+.chart-expand-hint{
+  position:absolute; top:2px; right:2px; font-family:var(--font-mono); font-size:9px; color:var(--brass-dim);
+  opacity:0; transition:opacity .15s; pointer-events:none; background:var(--bg-panel); padding:1px 4px; border-radius:3px;
+}
+button.chart-expand-btn:hover .chart-expand-hint{ opacity:1; color:var(--brass-bright); }
+.account-card-chart.chart-expand-btn{ flex:1; display:flex; align-items:center; margin-bottom:10px; min-height:40px; }
+
+/* detail modal */
+.modal:has(.cm-modal-section){ width:880px; max-width:94vw; }
+.cm-modal-sub{ font-size:11.5px; color:var(--text-dim); margin:-6px 0 16px; font-family:var(--font-mono); }
+.cm-modal-section{ margin-bottom:20px; }
+.cm-modal-section-label{
+  font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:0.08em;
+  color:var(--brass); margin-bottom:8px; display:flex; align-items:center; gap:6px;
+}
+.cm-modal-section .urv-sparkline, .cm-modal-section .cm-bar-svg{ height:auto; }
+.cm-modal-table-wrap{ max-height:260px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-sm); }
+table.cm-modal-table{ width:100%; font-size:12px; }
+table.cm-modal-table th{ position:sticky; top:0; background:var(--bg-panel-alt); z-index:1; }
 .kpi-mini-chart .urv-sparkline{ height:34px; }
 .kpi-mini-chart .urv-chart-area{ fill-opacity:0.5; }
 .kpi-card.sc-in .urv-chart-area{ fill:rgba(79,214,148,0.16); } .kpi-card.sc-in .urv-chart-line{ stroke:var(--green); } .kpi-card.sc-in .urv-chart-dot{ fill:var(--green); }
@@ -1056,6 +1089,7 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .home-combined-figures .label{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-dim); margin-bottom:2px; }
 .home-combined-figures .value{ font-size:20px; font-weight:800; color:var(--text-hi); }
 .home-combined-figures .value.brass{ color:var(--brass-bright); text-shadow:0 0 14px rgba(230,195,126,0.35); }
+.home-combined-figures .value.amber{ color:var(--amber); text-shadow:0 0 14px rgba(224,168,63,0.3); }
 .home-combined-card .urv-sparkline{ height:150px; position:relative; z-index:1; }
 .urv-axis-gridline{ stroke:rgba(255,255,255,0.08); stroke-width:1; }
 .urv-axis-label{ font-family:var(--font-mono); font-size:10px; fill:var(--text-dim); }
