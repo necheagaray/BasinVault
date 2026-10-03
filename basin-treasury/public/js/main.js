@@ -48,7 +48,7 @@ const Store = {
     this.lastLocalEdit = Date.now();
     this.editSeq++;
     this.render();
-    this.scheduleSave();
+    if (!PREVIEW_MODE) this.scheduleSave(); // preview mode: edits work locally, nothing is ever saved
   },
 
   render() {
@@ -172,7 +172,39 @@ function shortTime(iso) {
 
 /* ---------------------------------- boot ---------------------------------- */
 
+// Preview mode: ONLY activates when this file is opened directly (file://),
+// which can never happen on the real deployed site (always served over
+// http/https there) — so this has zero effect on the actual login flow.
+// It exists purely so this single HTML file can be double-clicked and looked
+// at immediately, with sample data, no login and nothing ever saved anywhere.
+let PREVIEW_MODE = false;
+
+function buildPreviewState() {
+  const state = defaultState();
+  state.unbilledRevenue = seedUnbilledRevenue();
+  state.updatedBy = "preview";
+  return state;
+}
+
+function bootPreview() {
+  PREVIEW_MODE = true;
+  Store.user = { user: "preview", name: "Preview", role: "editor" };
+  Store.canEdit = true;
+  document.body.classList.remove("viewer-mode");
+  document.getElementById("user-name").textContent = "Preview";
+  document.getElementById("user-initial").textContent = "P";
+  document.getElementById("role-tag").style.display = "none";
+  Store.state = buildPreviewState();
+  showApp();
+  Store.render();
+  const pill = document.getElementById("sync-pill");
+  pill.classList.add("preview-mode");
+  pill.title = "Preview mode — opened as a local file, not the real site. Nothing here is saved.";
+  document.getElementById("sync-label").textContent = "⚠ Preview — not saved";
+}
+
 async function boot() {
+  if (location.protocol === "file:") return bootPreview();
   const user = api.getUser();
   if (!api.getToken() || !user) return showLogin();
 
@@ -256,7 +288,10 @@ document.getElementById("btn-logout").addEventListener("click", () => {
 
 document.getElementById("btn-save-version").addEventListener("click", () => Store.pushNow().then(() => toast("Version saved", "success")));
 
-document.getElementById("sync-pill").addEventListener("click", () => Store.pullNow());
+document.getElementById("sync-pill").addEventListener("click", () => {
+  if (PREVIEW_MODE) { toast("Preview mode — this file isn't connected to the real vault.", "info"); return; }
+  Store.pullNow();
+});
 
 document.querySelector(".brand").addEventListener("click", () => {
   api.clearSession();

@@ -181,8 +181,22 @@ function receivablesBreakdown(state, period, wi, accountFilter = null /* e.g. "b
     }
   }
   for (const u of state.unbilledReceivables || []) {
-    if (u.status !== "open" || !matches(u)) continue;
+    if (u.status !== "open" || !matchesFor(u)) continue;
     open.push({ ...u, customer: `${u.customer} (unbilled)`, docNumber: u.project || "" });
+  }
+
+  // New Unbilled Revenue sections (Fixed Price Backlog, T&M, Frontlog, Small
+  // Quick Jobs, WIP, Other) — these always flow into Basin Checking (no
+  // per-item deposit account), so only include them for that account's
+  // breakdown, or the unfiltered AR-tab view.
+  if (!accountFilter || accountFilter === "basin-checking") {
+    const secLabel = Object.fromEntries(UNBILLED_REVENUE_SECTIONS.map((s) => [s.id, s.label]));
+    for (const occ of unbilledRevenueOccurrencesInPeriod(state, period)) {
+      if (wi !== null && occ.wi !== wi) continue;
+      const item = (state.unbilledRevenue || []).find((i) => i.id === occ.itemId);
+      const inv = item?.invoices?.[occ.invoiceIdx];
+      open.push({ customer: `${secLabel[occ.section] || occ.section} (unbilled revenue)`, docNumber: occ.name, date: inv?.invoiceDate, balance: occ.amount });
+    }
   }
 
   const totalOpen = open.reduce((a, r) => a + r.balance, 0);
@@ -360,29 +374,140 @@ function sliceTotals(weeks) {
 }
 
 // Same idea, for the 4 simplified accounts.
-function urvSparklineSVG(values, weeksMeta) {
-  const W = 280, H = 72, padX = 8, padY = 10;
+// Builds the chart HTML plus the point geometry, so the caller can wire up
+// hover-anywhere-snaps-to-nearest-point behavior afterward (a plain string
+// can't carry JS listeners, and native per-dot <title> tooltips require a
+// precise hover directly on a tiny circle, which is what this replaces).
+function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
+  const W = opts.W || 280, H = opts.H || 72, padX = opts.padX ?? 8, padY = opts.padY ?? 10;
   const n = values.length;
-  const max = Math.max(...values, 1); // avoid divide-by-zero when every week is $0
+  // fromZero:false scales min-to-max instead of 0-to-max — matters for large,
+  // relatively stable balances, where scaling from zero would flatten real
+  // week-to-week variation into a nearly invisible line.
+  const lo = opts.fromZero === false ? Math.min(...values) : 0;
+  const hi = Math.max(...values, lo + 1); // avoid divide-by-zero when flat
+  const range = hi - lo;
   const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
   const points = values.map((v, i) => ({
     x: padX + i * stepX,
-    y: H - padY - (v / max) * (H - padY * 2),
+    y: H - padY - ((v - lo) / range) * (H - padY * 2),
     v, i,
+    label: weeksMeta[i] ? `Week of ${fmtDateShort(weeksMeta[i].start)}` : `Week ${i + 1}`,
   }));
   const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const baseline = H - padY;
   const areaD = `${pathD} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
-  const dots = points.map((p) => {
-    const wk = weeksMeta[p.i];
-    const label = wk ? `Week of ${fmtDateShort(wk.start)}: ${fmtMoney(p.v)}` : fmtMoney(p.v);
-    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="urv-chart-dot"><title>${escapeHtml(label)}</title></circle>`;
-  }).join("");
-  return `<svg viewBox="0 0 ${W} ${H}" class="urv-sparkline" preserveAspectRatio="xMidYMid meet">
-    <path d="${areaD}" class="urv-chart-area"/>
-    <path d="${pathD}" class="urv-chart-line"/>
-    ${dots}
+  const dots = points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="urv-chart-dot" data-idx="${p.i}"/>`).join("");
+  const html = `<div class="urv-chart-wrap" data-chart="${chartId}">
+    <svg viewBox="0 0 ${W} ${H}" class="urv-sparkline" preserveAspectRatio="none">
+      <path d="${areaD}" class="urv-chart-area"/>
+      <path d="${pathD}" class="urv-chart-line"/>
+      <line class="urv-chart-vline" x1="0" y1="${padY - 4}" x2="0" y2="${baseline}"/>
+      ${dots}
+      <rect class="urv-chart-hitbox" x="0" y="0" width="${W}" height="${H}" data-chart="${chartId}"/>
+    </svg>
+    <div class="urv-chart-tooltip" id="urv-tooltip-${chartId}"></div>
+  </div>`;
+  return { html, points, W, H };
+}
+
+// Hover anywhere over a chart's hitbox and snap to whichever week's point is
+// nearest the cursor's x position — no need to land precisely on a dot.
+function moneyBagSVG(pct, idSuffix) {
+  const clipId = `bagclip-${idSuffix}`;
+  const bagPath = "M36,22 C20,30 8,50 10,70 C12,92 30,106 50,106 C70,106 88,92 90,70 C92,50 80,30 64,22 L36,22 Z";
+  const tiePath = "M42,13 Q50,6 58,13 L64,22 L36,22 Z";
+  const clampedPct = Math.max(0, Math.min(100, pct));
+  const fillY = 106 - (106 - 16) * (clampedPct / 100); // rises from the bottom (106) toward the neck (16) as pct climbs
+  return `<svg viewBox="0 0 100 112" class="money-bag-svg">
+    <defs><clipPath id="${clipId}"><path d="${bagPath}"/></clipPath></defs>
+    <path d="${bagPath}" class="bag-outline"/>
+    <g clip-path="url(#${clipId})">
+      <rect x="0" y="${fillY.toFixed(1)}" width="100" height="112" class="bag-fill"/>
+      <rect x="0" y="${(fillY - 3).toFixed(1)}" width="100" height="3" class="bag-fill-shimmer"/>
+    </g>
+    <path d="${bagPath}" class="bag-outline-top"/>
+    <path d="${tiePath}" class="bag-tie"/>
+    <text x="50" y="72" text-anchor="middle" class="bag-dollar">$</text>
   </svg>`;
+}
+
+function wireUrvChartHover(host, chartId, points, W) {
+  const wrap = host.querySelector(`.urv-chart-wrap[data-chart="${chartId}"]`);
+  if (!wrap) return;
+  const svg = wrap.querySelector(".urv-sparkline");
+  const hitbox = wrap.querySelector(".urv-chart-hitbox");
+  const vline = wrap.querySelector(".urv-chart-vline");
+  const tooltip = wrap.querySelector(`#urv-tooltip-${chartId}`);
+
+  const showNearest = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((clientX - rect.left) / rect.width) * W;
+    let nearest = points[0], minDist = Infinity;
+    for (const p of points) {
+      const d = Math.abs(p.x - svgX);
+      if (d < minDist) { minDist = d; nearest = p; }
+    }
+    svg.querySelectorAll(".urv-chart-dot").forEach((d) => d.classList.toggle("active", Number(d.dataset.idx) === nearest.i));
+    vline.setAttribute("x1", nearest.x); vline.setAttribute("x2", nearest.x);
+    vline.style.display = "block";
+    tooltip.textContent = `${nearest.label}: ${fmtMoney(nearest.v)}`;
+    tooltip.style.left = `${(nearest.x / W) * 100}%`;
+    tooltip.style.display = "block";
+  };
+  const hide = () => {
+    svg.querySelectorAll(".urv-chart-dot").forEach((d) => d.classList.remove("active"));
+    vline.style.display = "none";
+    tooltip.style.display = "none";
+  };
+  hitbox.addEventListener("mousemove", (e) => showNearest(e.clientX));
+  hitbox.addEventListener("mouseleave", hide);
+}
+
+// Revamped CF Forecast KPI row — icons, a color accent bar per card, and a
+// small embedded trend line showing the weekly shape behind each total
+// (Opening Cash is a single starting value, so it skips the chart).
+function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals) {
+  const host = document.getElementById(containerId);
+  if (!host) return;
+  const netTotal = totals.net;
+  const miniChart = (values, key, fromZero) => urvSparklineSVG(values, weeksMeta, `${chartPrefix}-${key}`, { W: 150, H: 36, padX: 3, padY: 4, fromZero });
+
+  const inChart = miniChart(weekly.inflow, "in", true);
+  const outChart = miniChart(weekly.outflow.map((v) => Math.abs(v)), "out", true);
+  const netChart = miniChart(weekly.net, "net", false);
+  const closeChart = miniChart(weekly.closing, "close", false);
+
+  host.innerHTML = `
+    <div class="stat-card kpi-card sc-open">
+      <div class="kpi-icon">◇</div>
+      <div class="kpi-body"><div class="label">Opening Cash</div><div class="value">${fmtMoney(totals.opening)}</div></div>
+    </div>
+    <div class="stat-card kpi-card sc-in">
+      <div class="kpi-icon">↗</div>
+      <div class="kpi-body"><div class="label">Total Inflows</div><div class="value green">${fmtMoney(totals.inflow)}</div></div>
+      <div class="kpi-mini-chart">${inChart.html}</div>
+    </div>
+    <div class="stat-card kpi-card sc-out">
+      <div class="kpi-icon">↘</div>
+      <div class="kpi-body"><div class="label">Total Outflows</div><div class="value red">${fmtMoney(totals.outflow)}</div></div>
+      <div class="kpi-mini-chart">${outChart.html}</div>
+    </div>
+    <div class="stat-card kpi-card sc-net">
+      <div class="kpi-icon">⇄</div>
+      <div class="kpi-body"><div class="label">Net Cash Flow</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</div></div>
+      <div class="kpi-mini-chart">${netChart.html}</div>
+    </div>
+    <div class="stat-card kpi-card sc-close">
+      <div class="kpi-icon">◆</div>
+      <div class="kpi-body"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(totals.closing)}</div></div>
+      <div class="kpi-mini-chart">${closeChart.html}</div>
+    </div>
+  `;
+  wireUrvChartHover(host, `${chartPrefix}-in`, inChart.points, inChart.W);
+  wireUrvChartHover(host, `${chartPrefix}-out`, outChart.points, outChart.W);
+  wireUrvChartHover(host, `${chartPrefix}-net`, netChart.points, netChart.W);
+  wireUrvChartHover(host, `${chartPrefix}-close`, closeChart.points, closeChart.W);
 }
 
 function sliceSimpleTotals(weeks) {
@@ -417,14 +542,15 @@ function renderSimpleAccountForecast(store, period, accountId) {
     ? "No activity except the monthly transfer in from Basin Checking."
     : `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
 
-  const netTotal = calc.totals.netCashflow;
-  document.getElementById("forecast-stats").innerHTML = `
-    <div class="stat-card sc-open"><div class="label">Opening Cash</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
-    <div class="stat-card sc-in"><div class="label">Total Inflows</div><div class="value green">${fmtMoney(calc.totals.inflowTotal)}</div></div>
-    <div class="stat-card sc-out"><div class="label">Total Outflows</div><div class="value red">${fmtMoney(calc.totals.outflowTotal)}</div></div>
-    <div class="stat-card sc-net"><div class="label">Net Cash Flow</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</div></div>
-    <div class="stat-card sc-close"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
-  `;
+  renderCfKpiCards("forecast-stats", "simple", weeksMeta, {
+    inflow: weeks.map((w) => w.inflowTotal),
+    outflow: weeks.map((w) => w.outflowTotal),
+    net: weeks.map((w) => w.netCashflow),
+    closing: weeks.map((w) => w.closing),
+  }, {
+    opening: calc.totals.opening, inflow: calc.totals.inflowTotal, outflow: calc.totals.outflowTotal,
+    net: calc.totals.netCashflow, closing: calc.totals.closing,
+  });
 
   // union of row keys that appear in ANY week, so every week shows the same rows even if a value is 0
   const inflowKeys = [], outflowKeys = [];
@@ -510,12 +636,51 @@ export function renderHome(store) {
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
   document.getElementById("home-meta").textContent = `${period.label} · ${cfViewWeeks}-week view · Starts ${fmtDate(period.startDate)}`;
 
+  document.querySelectorAll(".weeks-toggle-btn").forEach((b) => b.classList.toggle("active", Number(b.dataset.weeks) === cfViewWeeks));
+  document.querySelectorAll("#home-weeks-toggle-group .weeks-toggle-btn").forEach((b) => {
+    b.onclick = () => {
+      setGlobalViewWeeks(Number(b.dataset.weeks));
+      document.querySelectorAll(".weeks-toggle-btn").forEach((btn) => btn.classList.toggle("active", Number(btn.dataset.weeks) === cfViewWeeks));
+      store.render();
+    };
+  });
+
   const calcFor = (id) => {
     const full = id === "basin-checking" ? computeForecast(state, period) : computeSimpleAccountForecast(state, period, id);
     const weeks = full.weeks.slice(0, cfViewWeeks);
     const totals = id === "basin-checking" ? sliceTotals(weeks) : sliceSimpleTotals(weeks);
     return { weeks, totals };
   };
+
+  const combinedHost = document.getElementById("home-combined-chart");
+  if (combinedHost) {
+    const includedIds = ["basin-checking", "basin-savings", "pc-checking", "pc-savings"]; // excludes eb-savings per request
+    const perAccountWeeks = includedIds.map((id) => calcFor(id).weeks);
+    const nWeeks = perAccountWeeks[0]?.length || 0;
+    const combinedClosing = Array.from({ length: nWeeks }, (_, wi) => sum(perAccountWeeks.map((w) => w[wi]?.closing || 0)));
+    const combinedOpening = sum(perAccountWeeks.map((w) => w[0]?.opening || 0));
+    const closingNow = combinedClosing[combinedClosing.length - 1] || combinedOpening;
+    const netChange = closingNow - combinedOpening;
+    const weeksMetaForChart = periodWeeks(period).slice(0, cfViewWeeks);
+    const chart = urvSparklineSVG(combinedClosing, weeksMetaForChart, "home-combined", { W: 900, H: 150, padX: 14, padY: 14, fromZero: false });
+
+    combinedHost.innerHTML = `
+      <div class="panel home-combined-card">
+        <div class="home-combined-head">
+          <div>
+            <div class="home-combined-label">Combined Cash Position</div>
+            <div class="home-combined-sub">Basin Checking + Basin Savings + P&amp;C Checking + P&amp;C Savings — excludes EB Savings</div>
+          </div>
+          <div class="home-combined-figures">
+            <div><span class="label">Opening</span><span class="value">${fmtMoney(combinedOpening)}</span></div>
+            <div><span class="label">Net Change</span><span class="value ${netChange >= 0 ? "green" : "red"}">${fmtMoney(netChange, { signed: true })}</span></div>
+            <div><span class="label">Closing</span><span class="value brass">${fmtMoney(closingNow)}</span></div>
+          </div>
+        </div>
+        ${chart.html}
+      </div>`;
+    wireUrvChartHover(combinedHost, "home-combined", chart.points, chart.W);
+  }
 
   const cardHtml = (acct, extraClass = "") => {
     const calc = calcFor(acct.id);
@@ -658,15 +823,15 @@ export function renderForecast(store) {
   document.getElementById("forecast-eyebrow").textContent = `${cfViewWeeks}-Week View · Starts ${fmtDate(period.startDate)}`;
   document.getElementById("forecast-meta").textContent = `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
 
-  const statRow = document.getElementById("forecast-stats");
-  const netTotal = calc.totals.netCashflow;
-  statRow.innerHTML = `
-    <div class="stat-card sc-open"><div class="label">Opening Cash</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
-    <div class="stat-card sc-in"><div class="label">Total Inflows</div><div class="value green">${fmtMoney(calc.totals.totalInflows)}</div></div>
-    <div class="stat-card sc-out"><div class="label">Total Outflows</div><div class="value red">${fmtMoney(calc.totals.totalOutflows)}</div></div>
-    <div class="stat-card sc-net"><div class="label">Net Cash Flow</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</div></div>
-    <div class="stat-card sc-close"><div class="label">Closing Cash</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
-  `;
+  renderCfKpiCards("forecast-stats", "main", weeksMeta, {
+    inflow: weeks.map((w) => w.totalInflows),
+    outflow: weeks.map((w) => w.totalOutflows),
+    net: weeks.map((w) => w.netCashflow),
+    closing: weeks.map((w) => w.closing),
+  }, {
+    opening: calc.totals.opening, inflow: calc.totals.totalInflows, outflow: calc.totals.totalOutflows,
+    net: calc.totals.netCashflow, closing: calc.totals.closing,
+  });
 
   const rcBreakdowns = weeks.map((r, wi) => receivablesBreakdown(state, period, wi, "basin-checking"));
   const rcTotalBreakdown = receivablesBreakdown(state, period, null, "basin-checking");
@@ -1033,6 +1198,7 @@ let selectedAccountId = "basin-checking";
 // Lives here (not main.js) so every render function in this file can read it
 // directly; main.js drives it via setGlobalViewWeeks from the topbar buttons.
 export let cfViewWeeks = 6;
+const urvCollapsedSections = new Set(); // section ids currently collapsed — empty by default, so every section starts expanded
 export function setGlobalViewWeeks(n) { cfViewWeeks = n === 13 ? 13 : 6; }
 
 let arFilter = "open", arSearch = "", arWeekFilter = null, arCustomerFilter = "";
@@ -1057,12 +1223,16 @@ export function renderReceivables(store) {
   const uncertainTotal = uncertainList.reduce((a, r) => a + r.balance, 0);
 
   document.getElementById("ar-meta").textContent = `${state.receivables.length} invoices · ${openList.length} open`;
+  const weeklyScheduled = weeks.map((w) => openList.filter((r) => weekIndexForDate(period, r.cfDate) === w.index).reduce((s, r) => s + r.balance, 0));
+  const scheduledTotal = sum(weeklyScheduled);
+  const schedChart = urvSparklineSVG(weeklyScheduled, weeks, "ar-sched", { W: 150, H: 36, padX: 3, padY: 4, fromZero: true });
   document.getElementById("ar-stats").innerHTML = `
-    <div class="stat-card"><div class="label">Total AR</div><div class="value">${fmtMoney(totalAR)}</div></div>
-    <div class="stat-card"><div class="label">Open / Uncollected</div><div class="value">${fmtMoney(openAR)}</div></div>
-    <div class="stat-card"><div class="label">Scheduled This Period</div><div class="value green">${fmtMoney(weeks.reduce((a, w) => a + openList.filter((r) => weekIndexForDate(period, r.cfDate) === w.index).reduce((s, r) => s + r.balance, 0), 0))}</div></div>
-    <div class="stat-card sc-unc"><div class="label">Uncertain</div><div class="value amber">${fmtMoney(uncertainTotal)}</div></div>
+    <div class="stat-card kpi-card sc-close"><div class="kpi-icon">▤</div><div class="kpi-body"><div class="label">Total AR</div><div class="value brass">${fmtMoney(totalAR)}</div></div></div>
+    <div class="stat-card kpi-card sc-loc"><div class="kpi-icon">○</div><div class="kpi-body"><div class="label">Open / Uncollected</div><div class="value indigo">${fmtMoney(openAR)}</div></div></div>
+    <div class="stat-card kpi-card sc-in"><div class="kpi-icon">↗</div><div class="kpi-body"><div class="label">Scheduled This Period</div><div class="value green">${fmtMoney(scheduledTotal)}</div></div><div class="kpi-mini-chart">${schedChart.html}</div></div>
+    <div class="stat-card kpi-card sc-unc"><div class="kpi-icon">!</div><div class="kpi-body"><div class="label">Uncertain</div><div class="value amber">${fmtMoney(uncertainTotal)}</div></div></div>
   `;
+  wireUrvChartHover(document.getElementById("ar-stats"), "ar-sched", schedChart.points, schedChart.W);
 
   const insightsHost = document.getElementById("ar-insights");
   insightsHost.innerHTML = `<button type="button" class="insight-btn" id="ar-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>`;
@@ -1074,8 +1244,8 @@ export function renderReceivables(store) {
     const isCurrent = w.index === 0;
     const full = bd.totalAll > 0 && bd.pct >= 100;
     const filtered = arWeekFilter === w.index;
-    return `<div class="collect-card ${isCurrent ? "current" : ""} ${full ? "full" : ""} ${filtered ? "filtered" : ""}" data-wi="${w.index}" title="Click the card to filter the table below · click 🔍 for a detailed breakdown">
-      <div class="sand-fill" style="height:${bd.pct}%"><div class="sand-surface"></div></div>
+    return `<div class="collect-card money-bag-card ${isCurrent ? "current" : ""} ${full ? "full" : ""} ${filtered ? "filtered" : ""}" data-wi="${w.index}" title="Click the card to filter the table below · click 🔍 for a detailed breakdown">
+      <div class="bag-wrap">${moneyBagSVG(bd.pct, w.index)}</div>
       <div class="card-content">
         <div class="wk">${fmtDateShort(w.start)} – ${fmtDateShort(w.end)}</div>
         <div class="dt">${fmtDate(w.start)}</div>
@@ -1503,8 +1673,9 @@ function renderUnbilledRevenueSections(store, period) {
   const list = state.unbilledRevenue || [];
 
   // Breakdown: a line chart per section, one point per week, scoped to
-  // whichever view — 6 or 13 weeks — is currently active. Hover any point
-  // for that week's figure (native SVG tooltip); the period total sits below.
+  // whichever view — 6 or 13 weeks — is currently active. Hover anywhere over
+  // a chart (not just precisely on a dot) and it snaps to the nearest week;
+  // the period total sits below each chart.
   const breakdownHost = document.getElementById("urv-breakdown");
   if (breakdownHost) {
     const weeksMeta = periodWeeks(period).slice(0, cfViewWeeks);
@@ -1513,17 +1684,22 @@ function renderUnbilledRevenueSections(store, period) {
     for (const sec of UNBILLED_REVENUE_SECTIONS) weeklyBySection[sec.id] = Array(cfViewWeeks).fill(0);
     for (const occ of occurrences) weeklyBySection[occ.section][occ.wi] += occ.amount;
 
+    const charts = []; // { chartId, points, W } — wired up after innerHTML is set
     breakdownHost.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => {
       const weekly = weeklyBySection[sec.id];
       const periodTotal = sum(weekly);
+      const chartId = `urv-${sec.id}`;
+      const chart = urvSparklineSVG(weekly, weeksMeta, chartId);
+      charts.push({ chartId, points: chart.points, W: chart.W });
       return `
       <div class="urv-chart-card">
         <div class="label">${escapeHtml(sec.label)}</div>
-        ${urvSparklineSVG(weekly, weeksMeta)}
+        ${chart.html}
         <div class="urv-chart-total">${fmtMoney(periodTotal)}</div>
         <div class="urv-chart-sub">scheduled over ${cfViewWeeks} weeks</div>
       </div>`;
     }).join("");
+    for (const c of charts) wireUrvChartHover(breakdownHost, c.chartId, c.points, c.W);
   }
 
   host.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => {
@@ -1537,21 +1713,37 @@ function renderUnbilledRevenueSections(store, period) {
         <td><button type="button" class="mini-btn urv-delete" data-id="${item.id}" title="Delete this line item">🗑</button></td>
       </tr>`).join("");
 
+    const isCollapsed = urvCollapsedSections.has(sec.id);
     return `
       <div class="panel urv-section">
-        <div class="fixed-group-head">
-          <h3>${escapeHtml(sec.label)} <span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span></h3>
+        <div class="fixed-group-head urv-section-head" data-section="${sec.id}">
+          <h3><button type="button" class="urv-collapse-btn" data-section="${sec.id}" title="${isCollapsed ? "Expand" : "Collapse"}">${isCollapsed ? "▸" : "▾"}</button>${escapeHtml(sec.label)} <span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span></h3>
           <span class="total">${fmtMoney(sectionTotal)}</span>
         </div>
+        ${isCollapsed ? "" : `
         <div class="table-scroll">
           <table class="data-table urv-table">
-            <thead><tr><th>Name</th><th>Invoice 1</th><th>Invoice 2</th><th>Invoice 3</th><th class="num">Total</th><th></th></tr></thead>
+            <thead>
+              <tr><th></th><th class="urv-month-label">OCT</th><th class="urv-month-label">NOV</th><th class="urv-month-label">DEC</th><th></th><th></th></tr>
+              <tr><th>Name</th><th>Invoice 1</th><th>Invoice 2</th><th>Invoice 3</th><th class="num">Total</th><th></th></tr>
+            </thead>
             <tbody>${rows || `<tr><td colspan="6" class="meta" style="padding:14px;">No line items yet.</td></tr>`}</tbody>
           </table>
         </div>
         <div style="padding:12px 16px;"><button type="button" class="btn-ghost urv-add-item" data-section="${sec.id}">+ Add Line Item</button></div>
+        `}
       </div>`;
   }).join("");
+
+  host.querySelectorAll(".urv-collapse-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const secId = btn.dataset.section;
+      if (urvCollapsedSections.has(secId)) urvCollapsedSections.delete(secId);
+      else urvCollapsedSections.add(secId);
+      renderUnbilledRevenueSections(store, period);
+    });
+  });
 
   const findItem = (id) => store.state.unbilledRevenue.find((i) => i.id === id);
   const touch = (it) => { it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString(); };
@@ -1799,11 +1991,14 @@ export function renderPayables(store) {
   const unscheduled = totalAP - scheduled;
 
   document.getElementById("ap-meta").textContent = `${openList.length} open · ${openList.filter((p) => !effectivePayableDate(state, period, p)).length} unscheduled`;
+  const weeklyApScheduled = weeks.map((w) => openList.filter((p) => weekIndexForDate(period, effectivePayableDate(state, period, p)) === w.index).reduce((a, p) => a + p.balance, 0));
+  const apSchedChart = urvSparklineSVG(weeklyApScheduled, weeks, "ap-sched", { W: 150, H: 36, padX: 3, padY: 4, fromZero: true });
   document.getElementById("ap-stats").innerHTML = `
-    <div class="stat-card"><div class="label">Open AP</div><div class="value">${fmtMoney(totalAP)}</div></div>
-    <div class="stat-card"><div class="label">Scheduled</div><div class="value green">${fmtMoney(scheduled)}</div></div>
-    <div class="stat-card"><div class="label">Unscheduled</div><div class="value red">${fmtMoney(unscheduled)}</div></div>
+    <div class="stat-card kpi-card sc-close"><div class="kpi-icon">▤</div><div class="kpi-body"><div class="label">Open AP</div><div class="value brass">${fmtMoney(totalAP)}</div></div></div>
+    <div class="stat-card kpi-card sc-out"><div class="kpi-icon">↘</div><div class="kpi-body"><div class="label">Scheduled</div><div class="value green">${fmtMoney(scheduled)}</div></div><div class="kpi-mini-chart">${apSchedChart.html}</div></div>
+    <div class="stat-card kpi-card sc-unc"><div class="kpi-icon">!</div><div class="kpi-body"><div class="label">Unscheduled</div><div class="value amber">${fmtMoney(unscheduled)}</div></div></div>
   `;
+  wireUrvChartHover(document.getElementById("ap-stats"), "ap-sched", apSchedChart.points, apSchedChart.W);
 
   document.querySelectorAll("#ap-status-tabs button").forEach((b) => {
     b.classList.toggle("active", b.dataset.f === apFilter);
