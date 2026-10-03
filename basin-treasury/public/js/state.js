@@ -1013,6 +1013,7 @@ export function mergeStates(local, remote) {
   merged.payables = mergeById(local.payables, remote.payables, lt.payables, rt.payables);
   merged.fixedPayments = mergeById(local.fixedPayments, remote.fixedPayments, lt.fixedPayments, rt.fixedPayments);
   merged.transfers = mergeById(local.transfers || [], remote.transfers || [], lt.transfers, rt.transfers);
+  merged.unbilledRevenue = mergeById(local.unbilledRevenue || [], remote.unbilledRevenue || [], lt.unbilledRevenue, rt.unbilledRevenue);
 
   merged.tombstones = {
     receivables: mergeTombstones(lt.receivables, rt.receivables),
@@ -1020,6 +1021,7 @@ export function mergeStates(local, remote) {
     fixedPayments: mergeTombstones(lt.fixedPayments, rt.fixedPayments),
     unbilledReceivables: mergeTombstones(lt.unbilledReceivables, rt.unbilledReceivables),
     transfers: mergeTombstones(lt.transfers, rt.transfers),
+    unbilledRevenue: mergeTombstones(lt.unbilledRevenue, rt.unbilledRevenue),
   };
 
   merged.customerAutoSchedule = { ...remote.customerAutoSchedule, ...local.customerAutoSchedule };
