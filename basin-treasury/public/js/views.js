@@ -2083,6 +2083,48 @@ function openUnbilledImportReviewModal(store, parsedResult) {
 let apFilter = "open", apSearch = "", apVendorFilter = "", apPayrunFilter = "";
 const apSelected = new Set();
 
+// Drag-to-resize table columns, with the resulting widths saved so they
+// persist between visits. Safe to call on every render — guards against
+// re-wiring the same table's listeners more than once, and re-applies saved
+// widths each time in case the column set changed.
+function wireResizableColumns(table) {
+  if (!table) return;
+  const storageKey = `colwidths:${table.id}`;
+  const cols = table.querySelectorAll("colgroup col[data-col]");
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { /* ignore corrupt data */ }
+  cols.forEach((col) => { if (saved[col.dataset.col]) col.style.width = `${saved[col.dataset.col]}px`; });
+
+  if (table.dataset.resizeWired) return;
+  table.dataset.resizeWired = "1";
+
+  table.querySelectorAll("th .col-resize-handle").forEach((handle, idx) => {
+    const col = cols[idx];
+    if (!col) return;
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = col.getBoundingClientRect().width;
+      handle.classList.add("resizing");
+      const onMove = (ev) => {
+        const next = Math.max(50, startWidth + (ev.clientX - startX));
+        col.style.width = `${next}px`;
+      };
+      const onUp = () => {
+        handle.classList.remove("resizing");
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        let current = {};
+        try { current = JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { /* ignore */ }
+        current[col.dataset.col] = Math.round(col.getBoundingClientRect().width);
+        localStorage.setItem(storageKey, JSON.stringify(current));
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  });
+}
+
 export function renderPayables(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
@@ -2142,6 +2184,7 @@ export function renderPayables(store) {
   document.getElementById("ap-insight-vendors").onclick = () => openTopVendorsModal(openList);
 
   renderAPRows(store, period);
+  wireResizableColumns(document.getElementById("ap-table"));
 }
 
 function openPayrunTotalsModal(store, period, weeks, openList) {

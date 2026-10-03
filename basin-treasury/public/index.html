@@ -301,11 +301,26 @@
         <span class="meta mono" id="ap-count"></span>
       </div>
       <div class="table-scroll">
-        <table class="data-table" id="ap-table">
+        <table class="data-table resizable-table" id="ap-table">
+            <colgroup>
+              <col style="width:30px;" />
+              <col style="width:140px;" data-col="vendor" />
+              <col style="width:90px;" data-col="docnum" />
+              <col style="width:100px;" data-col="date" />
+              <col style="width:260px;" data-col="memo" />
+              <col style="width:110px;" data-col="balance" />
+              <col style="width:220px;" data-col="payrun" />
+              <col style="width:30px;" />
+            </colgroup>
             <thead><tr>
-              <th style="width:30px;"><input type="checkbox" id="ap-select-all" /></th>
-              <th>Vendor</th><th>Invoice #</th><th>Date</th><th>Memo</th>
-              <th class="num">Balance</th><th>Pay Run (CF Date)</th><th></th>
+              <th><input type="checkbox" id="ap-select-all" /></th>
+              <th>Vendor<span class="col-resize-handle"></span></th>
+              <th>Invoice #<span class="col-resize-handle"></span></th>
+              <th>Date<span class="col-resize-handle"></span></th>
+              <th>Memo<span class="col-resize-handle"></span></th>
+              <th class="num">Balance<span class="col-resize-handle"></span></th>
+              <th>Pay Run (CF Date)<span class="col-resize-handle"></span></th>
+              <th></th>
             </tr></thead>
             <tbody id="ap-tbody"></tbody>
           </table>

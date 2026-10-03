@@ -122,7 +122,12 @@ const Store = {
       if (!remote) return;
       if (this.hasUnsavedWork()) { if (!silent) toast("You have unsaved edits — finish those before pulling.", "info"); return; }
       if (this.state && remote.version === this.state.version) { if (!silent) toast("Already up to date", "info"); return; }
-      this.state = remote;
+      // Merge rather than blindly replace — even with no known-pending edits,
+      // a background poll's read can land a moment before the server's write
+      // path has fully caught up to a save that just completed. Merging
+      // means a genuinely newer local edit always wins over a stale read,
+      // instead of silently reverting it.
+      this.state = this.state ? mergeStates(this.state, remote) : remote;
       this.editSeq = 0;
       this.savedSeq = 0;
       this.render();
