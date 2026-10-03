@@ -495,14 +495,16 @@ export function renderHome(store) {
   const cardHtml = (acct, extraClass = "") => {
     const calc = calcFor(acct.id);
     const netTotal = calc.totals.netCashflow;
+    const openingDate = calc.weeks[0]?.week?.start;
+    const closingDate = calc.weeks[calc.weeks.length - 1]?.week?.end;
     return `
       <div class="panel account-card ${acct.isMain ? "main-account" : ""} ${extraClass}" data-account="${acct.id}" role="button" tabindex="0" style="grid-area:${acct.id};">
         ${acct.isMain ? `<div class="main-account-badge">★ MAIN OPERATING ACCOUNT</div>` : ""}
         <div class="account-card-name">${escapeHtml(acct.name)}</div>
         <div class="account-card-figures">
-          <div><div class="label">Opening</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
+          <div><div class="label">Opening ${openingDate ? `<span class="as-of-date">as of ${fmtDateShort(openingDate)}</span>` : ""}</div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
           <div><div class="label">Net Change</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal, { signed: true })}</div></div>
-          <div><div class="label">Closing (End of ${cfViewWeeks}-Week View)</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+          <div><div class="label">Closing (End of ${cfViewWeeks}-Week View) ${closingDate ? `<span class="as-of-date">as of ${fmtDateShort(closingDate)}</span>` : ""}</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
         </div>
         <div class="account-card-cta">View ${escapeHtml(acct.name)} Forecast ▸</div>
       </div>`;
@@ -1509,13 +1511,16 @@ function openTopUnbilledCustomersModal(openList) {
 
 function urvInvoiceCell(item, idx) {
   const inv = item.invoices[idx] || blankInvoice();
+  const id = item.id;
   if (!inv.amount) {
-    return `<td class="urv-inv-cell urv-inv-empty" data-id="${item.id}" data-idx="${idx}">+ add invoice</td>`;
+    return `<td class="urv-inv-cell urv-inv-empty-cell" data-id="${id}" data-idx="${idx}"><span class="urv-add-invoice" data-id="${id}" data-idx="${idx}">+ add invoice</span></td>`;
   }
-  const cfLabel = inv.cfDate ? fmtDate(inv.cfDate) : `<span class="urv-cf-unset">— assign CF date —</span>`;
-  return `<td class="urv-inv-cell" data-id="${item.id}" data-idx="${idx}">
-    <div class="urv-inv-amt">${fmtMoney(inv.amount)}</div>
-    <div class="urv-inv-dates">Inv: ${inv.invoiceDate ? fmtDate(inv.invoiceDate) : "—"} · CF: ${cfLabel}</div>
+  const days = (inv.invoiceDate && inv.cfDate) ? Math.round((parseISO(inv.cfDate) - parseISO(inv.invoiceDate)) / 86400000) : "";
+  return `<td class="urv-inv-cell" data-id="${id}" data-idx="${idx}">
+    <div class="urv-amt-edit" data-id="${id}" data-idx="${idx}" title="Click to edit the amount">${fmtMoney(inv.amount)}</div>
+    <div class="urv-inv-row"><span class="urv-inv-label">Inv:</span> <span class="urv-date-edit urv-invdate-edit" data-id="${id}" data-idx="${idx}" title="Click to change the invoice date">${inv.invoiceDate ? fmtDate(inv.invoiceDate) : "— set —"}</span></div>
+    <div class="urv-inv-row"><input class="mini-input urv-days-input" data-id="${id}" data-idx="${idx}" type="text" placeholder="days" value="${days}" title="Days after the invoice date — sets the CF date automatically" /><span class="urv-inv-label">d → CF</span></div>
+    <div class="urv-inv-row"><span class="urv-inv-label">CF:</span> <span class="urv-date-edit urv-cfdate-edit ${!inv.cfDate ? "urv-cf-unset" : ""}" data-id="${id}" data-idx="${idx}" title="Click to pick the CF date directly">${inv.cfDate ? fmtDate(inv.cfDate) : "— assign —"}</span></div>
   </td>`;
 }
 
@@ -1552,9 +1557,113 @@ function renderUnbilledRevenueSections(store, period) {
       </div>`;
   }).join("");
 
-  host.querySelectorAll(".urv-inv-cell").forEach((td) => {
-    td.addEventListener("click", () => openUrvInvoiceModal(store, td.dataset.id, Number(td.dataset.idx)));
+  const findItem = (id) => store.state.unbilledRevenue.find((i) => i.id === id);
+  const touch = (it) => { it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString(); };
+
+  // "+ add invoice" — inline, no modal: type an amount and the slot is created
+  host.querySelectorAll(".urv-add-invoice").forEach((span) => {
+    span.addEventListener("click", () => {
+      const { id, idx } = span.dataset;
+      const input = document.createElement("input");
+      input.type = "number"; input.step = "0.01"; input.className = "mini-input"; input.placeholder = "0.00"; input.style.width = "90px";
+      const td = span.closest("td");
+      td.innerHTML = ""; td.appendChild(input); input.focus();
+      const commit = () => {
+        const amt = parseFloat(input.value || "0");
+        if (amt > 0) {
+          store.mutate((s) => {
+            const it = s.unbilledRevenue.find((i) => i.id === id);
+            it.invoices[Number(idx)] = { amount: Math.round(amt * 100) / 100, invoiceDate: null, cfDate: null };
+            touch(it);
+          });
+        } else {
+          renderUnbilledRevenueSections(store, period); // nothing entered — just redraw back to empty state
+        }
+      };
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+      input.addEventListener("blur", commit, { once: true });
+    });
   });
+
+  // amount — click to edit inline
+  host.querySelectorAll(".urv-amt-edit").forEach((div) => {
+    div.addEventListener("click", () => {
+      const { id, idx } = div.dataset;
+      const it0 = findItem(id);
+      const current = it0.invoices[Number(idx)].amount;
+      const input = document.createElement("input");
+      input.type = "number"; input.step = "0.01"; input.className = "mini-input"; input.value = current; input.style.width = "90px";
+      div.innerHTML = ""; div.appendChild(input); input.focus(); input.select();
+      const commit = () => {
+        const val = parseFloat(input.value || "0");
+        store.mutate((s) => {
+          const it = s.unbilledRevenue.find((i) => i.id === id);
+          it.invoices[Number(idx)].amount = Math.max(0, Math.round((val || 0) * 100) / 100);
+          touch(it);
+        });
+      };
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); if (e.key === "Escape") { input.value = current; input.blur(); } });
+      input.addEventListener("blur", commit, { once: true });
+    });
+  });
+
+  // invoice date — click to pick from a native calendar, same pattern as Existing AR
+  host.querySelectorAll(".urv-invdate-edit").forEach((span) => {
+    span.addEventListener("click", () => {
+      const { id, idx } = span.dataset;
+      const it0 = findItem(id);
+      const input = document.createElement("input");
+      input.type = "date"; input.className = "mini-input"; input.style.width = "128px";
+      input.value = it0.invoices[Number(idx)].invoiceDate || "";
+      span.innerHTML = ""; span.appendChild(input); input.focus();
+      if (input.showPicker) { try { input.showPicker(); } catch { /* ignore */ } }
+      input.addEventListener("blur", () => {
+        store.mutate((s) => {
+          const it = s.unbilledRevenue.find((i) => i.id === id);
+          it.invoices[Number(idx)].invoiceDate = input.value || null;
+          touch(it);
+        });
+      }, { once: true });
+    });
+  });
+
+  // CF date — same calendar pattern, directly, no need to go through "days" if you just know the date
+  host.querySelectorAll(".urv-cfdate-edit").forEach((span) => {
+    span.addEventListener("click", () => {
+      const { id, idx } = span.dataset;
+      const it0 = findItem(id);
+      const input = document.createElement("input");
+      input.type = "date"; input.className = "mini-input"; input.style.width = "128px";
+      input.value = it0.invoices[Number(idx)].cfDate || "";
+      span.innerHTML = ""; span.appendChild(input); input.focus();
+      if (input.showPicker) { try { input.showPicker(); } catch { /* ignore */ } }
+      input.addEventListener("blur", () => {
+        store.mutate((s) => {
+          const it = s.unbilledRevenue.find((i) => i.id === id);
+          it.invoices[Number(idx)].cfDate = input.value || null;
+          touch(it);
+        });
+      }, { once: true });
+    });
+  });
+
+  // days-after-invoice-date — same convenience Existing AR has, sets CF date automatically
+  host.querySelectorAll(".urv-days-input").forEach((input) => {
+    input.addEventListener("change", () => {
+      const { id, idx } = input.dataset;
+      const raw = input.value.trim();
+      store.mutate((s) => {
+        const it = s.unbilledRevenue.find((i) => i.id === id);
+        const inv = it.invoices[Number(idx)];
+        if (raw === "") { return; } // leave CF date untouched if cleared
+        const days = Number(raw);
+        if (Number.isNaN(days) || !inv.invoiceDate) { toast("Set the invoice date first, then enter days", "error"); return; }
+        inv.cfDate = toISO(addDays(inv.invoiceDate, days));
+        touch(it);
+      });
+    });
+  });
+
   host.querySelectorAll(".urv-name-text").forEach((span) => {
     span.addEventListener("click", () => openUrvRenameModal(store, span.dataset.id));
   });
@@ -1600,49 +1709,6 @@ function openUrvRenameModal(store, itemId) {
         store.mutate((s) => {
           const it = s.unbilledRevenue.find((i) => i.id === itemId);
           it.name = name; it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString();
-        });
-        closeModal();
-      };
-    },
-  });
-}
-
-function openUrvInvoiceModal(store, itemId, idx) {
-  const item = store.state.unbilledRevenue.find((i) => i.id === itemId);
-  if (!item) return;
-  const inv = item.invoices[idx] || blankInvoice();
-  openModal(`
-    <button type="button" class="modal-close-x" id="uri-close">✕</button>
-    <h3>Invoice ${idx + 1} — ${escapeHtml(item.name)}</h3>
-    <div class="row"><label>Amount</label><input id="uri-amount" type="number" step="0.01" value="${inv.amount || ""}" placeholder="0.00" /></div>
-    <div class="row"><label>Invoice Date</label><input id="uri-invdate" type="date" value="${inv.invoiceDate || ""}" /></div>
-    <div class="row"><label>CF Date</label><input id="uri-cfdate" type="date" value="${inv.cfDate || ""}" /></div>
-    <div class="desc" style="font-size:11.5px;color:var(--text-dim);margin-top:-6px;">A CF date is what makes this invoice flow into Receivables Collected on CF Forecast. Leave it blank until you're ready to schedule it.</div>
-    <div class="modal-actions">
-      ${inv.amount ? `<button class="btn-ghost" id="uri-clear">Clear</button>` : ""}
-      <button class="btn-ghost" id="uri-cancel">Cancel</button>
-      <button class="btn-primary" id="uri-save" style="width:auto;">Save</button>
-    </div>
-  `, {
-    onMount: (host) => {
-      host.querySelector("#uri-close").onclick = closeModal;
-      host.querySelector("#uri-cancel").onclick = closeModal;
-      host.querySelector("#uri-clear")?.addEventListener("click", () => {
-        store.mutate((s) => {
-          const it = s.unbilledRevenue.find((i) => i.id === itemId);
-          it.invoices[idx] = blankInvoice();
-          it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString();
-        });
-        closeModal();
-      });
-      host.querySelector("#uri-save").onclick = () => {
-        const amount = parseFloat(host.querySelector("#uri-amount").value || "0");
-        const invoiceDate = host.querySelector("#uri-invdate").value || null;
-        const cfDate = host.querySelector("#uri-cfdate").value || null;
-        store.mutate((s) => {
-          const it = s.unbilledRevenue.find((i) => i.id === itemId);
-          it.invoices[idx] = { amount: Math.round((amount || 0) * 100) / 100, invoiceDate, cfDate };
-          it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString();
         });
         closeModal();
       };

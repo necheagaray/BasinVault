@@ -756,12 +756,21 @@ button.payrun-filter-btn.active .filter-icon{ opacity:1; color:var(--brass); }
 .urv-table{ font-size:12px; }
 .urv-name-text{ cursor:pointer; border-bottom:1px dashed var(--line-bright); }
 .urv-name-text:hover{ color:var(--brass-bright); }
-.urv-inv-cell{ cursor:pointer; min-width:150px; padding:8px 10px !important; transition:background .15s; vertical-align:middle; }
-.urv-inv-cell:hover{ background:rgba(200,163,90,0.1); }
-.urv-inv-cell.urv-inv-empty{ color:var(--text-dim); font-style:italic; text-align:center; }
-.urv-inv-amt{ font-weight:700; color:var(--text-hi); }
-.urv-inv-dates{ font-family:var(--font-mono); font-size:10px; color:var(--text-dim); margin-top:2px; }
-.urv-cf-unset{ color:var(--red); font-style:italic; }
+.urv-inv-cell{ min-width:168px; padding:8px 10px !important; vertical-align:middle; }
+.urv-inv-empty-cell{ text-align:center; }
+.urv-add-invoice{ cursor:pointer; color:var(--text-dim); font-style:italic; padding:4px 8px; border-radius:4px; transition:background .15s, color .15s; }
+.urv-add-invoice:hover{ background:rgba(200,163,90,0.12); color:var(--brass-bright); }
+.urv-amt-edit{
+  font-weight:700; color:var(--text-hi); cursor:pointer; padding:2px 4px; margin:-2px -4px 2px; border-radius:3px;
+  box-shadow:inset 0 -1px 0 0 var(--brass-dim); transition:background .15s;
+}
+.urv-amt-edit:hover{ background:rgba(200,163,90,0.12); }
+.urv-inv-row{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-top:2px; display:flex; align-items:center; gap:4px; }
+.urv-inv-label{ color:var(--text-dim); white-space:nowrap; }
+.urv-date-edit{ cursor:pointer; color:var(--text-hi); border-bottom:1px dashed var(--line-bright); }
+.urv-date-edit:hover{ color:var(--brass-bright); border-bottom-color:var(--brass-bright); }
+.urv-cf-unset, .urv-cf-unset.urv-date-edit{ color:var(--red); font-style:italic; border-bottom-color:rgba(239,111,92,0.4); }
+.urv-days-input{ width:38px !important; text-align:center; padding:2px 3px !important; font-size:10px !important; }
 .fixed-group-head{ display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--line);}
 
 .interest-inputs-row{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; padding:14px 16px 10px; }
@@ -1019,6 +1028,7 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .account-card-figures{ display:grid; grid-template-columns:1fr; gap:9px; margin-bottom:12px; flex:1; }
 .account-card-figures > div{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
 .account-card-figures .label{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-dim); }
+.as-of-date{ text-transform:none; letter-spacing:0; opacity:0.75; font-style:italic; margin-left:4px; }
 .account-card-figures .value{ font-family:var(--font-mono); font-size:16px; font-weight:700; color:var(--text-hi); text-shadow:0 0 14px rgba(255,255,255,0.08); }
 .account-card-figures .value.green{ color:var(--green); text-shadow:0 0 16px rgba(79,214,148,0.35); }
 .account-card-figures .value.red{ color:var(--red); text-shadow:0 0 16px rgba(239,111,92,0.3); }
