@@ -476,10 +476,18 @@ select.period-select{
   color:var(--text-hi); position:relative; z-index:1; text-shadow:0 0 22px rgba(255,255,255,0.1);
 }
 .kpi-big-figure-value.brass{ color:var(--brass-bright); text-shadow:0 0 26px rgba(230,195,126,0.4); }
+.kpi-big-figure:hover::before{ opacity:0.05; }
+.kpi-big-figure-date{
+  font-family:var(--font-mono); font-size:11px; color:var(--text-dim); font-style:italic;
+  position:relative; z-index:1; margin-top:2px;
+}
 .kpi-icon{
   position:absolute; top:14px; right:16px; font-size:19px; color:var(--accent-color, var(--brass));
   opacity:0.55; line-height:1; font-weight:700;
 }
+.kpi-icon-bill{ opacity:1; display:flex; }
+.bill-icon-standalone{ display:block; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.4)); }
+
 .kpi-body{ position:relative; z-index:1; }
 .kpi-mini-chart{ margin-top:auto; padding-top:10px; position:relative; z-index:1; }
 
@@ -502,6 +510,9 @@ select.period-select{
 .cm-bar-pos{ fill:var(--green); }
 .cm-bar-neg{ fill:var(--red); }
 .cm-bar.active{ opacity:1; filter:brightness(1.3); }
+.cm-bar-value-label{ font-family:var(--font-mono); font-size:11px; font-weight:700; }
+.cm-bar-value-label.pos{ fill:var(--green); }
+.cm-bar-value-label.neg{ fill:var(--red); }
 
 /* click-to-expand affordance on any chart wrapped as a button */
 button.chart-expand-btn{
@@ -931,8 +942,15 @@ button.payrun-filter-btn.active .filter-icon{ opacity:1; color:var(--brass); }
 .urv-chart-total{ font-size:19px; font-weight:800; color:var(--text-hi); margin-top:6px; }
 .urv-chart-sub{ font-size:10.5px; color:var(--text-dim); margin-top:1px; }
 
-.urv-outflow-marker-bg{ fill:var(--bg-deep); stroke:var(--red); stroke-width:1.5; }
-.urv-outflow-marker-arrow{ fill:none; stroke:var(--red); stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+.urv-outflow-marker{ cursor:default; }
+.bill-rect{
+  fill:#2f6b4a; stroke:#1a3d29; stroke-width:1;
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+}
+.bill-inner-border{ fill:none; stroke:#8fd4ae; stroke-width:0.6; stroke-dasharray:1.2,0.8; opacity:0.85; }
+.bill-medallion{ fill:#e9dfb8; stroke:#8fd4ae; stroke-width:0.8; }
+.bill-d-letter{ font-family:var(--font-display); font-size:6px; font-weight:800; fill:#2f6b4a; }
+.bill-corner-mark{ font-family:var(--font-mono); font-size:4.2px; font-weight:700; fill:#8fd4ae; }
 .urv-chart-tooltip.has-outflow{ border-color:var(--red); color:var(--red); }
 .outflow-legend{ display:inline-flex; align-items:center; gap:5px; margin-left:4px; color:var(--red); }
 .outflow-legend-dot{ width:7px; height:7px; border-radius:50%; background:var(--bg-deep); border:1.5px solid var(--red); display:inline-block; }

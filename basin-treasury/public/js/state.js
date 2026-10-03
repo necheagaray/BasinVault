@@ -30,7 +30,7 @@ export function accountName(id) {
 // The 6 Unbilled Revenue sections — a completely separate structure from the
 // existing Unbilled AR (project revenue forecast) list.
 export const UNBILLED_REVENUE_SECTIONS = [
-  { id: "fixedPriceBacklog", label: "Fixed Price Revenue Backlog" },
+  { id: "fixedPriceBacklog", label: "Fixed Price Rolling Revenue Forecast" },
   { id: "tm", label: "T&M Projections" },
   { id: "frontlog", label: "High Dollar, High Probability Frontlog" },
   { id: "smallQuickJobs", label: "Small, Quick Jobs" },

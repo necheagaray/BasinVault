@@ -413,9 +413,13 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
   const areaD = `${pathD} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
   const dots = points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="urv-chart-dot" data-idx="${p.i}"/>`).join("");
   const markers = points.filter((p) => p.annotation).map((p) => `
-    <g class="urv-outflow-marker" transform="translate(${p.x.toFixed(1)},${(p.y + 11).toFixed(1)})" title="${escapeHtml(p.annotation.label)}: -${fmt(p.annotation.amount)}">
-      <circle r="7" class="urv-outflow-marker-bg"/>
-      <path d="M-2.5,-2.5 L0,2.5 L2.5,-2.5" class="urv-outflow-marker-arrow"/>
+    <g class="urv-outflow-marker" transform="translate(${p.x.toFixed(1)},${(p.y + 14).toFixed(1)})" title="${escapeHtml(p.annotation.label)}: -${fmt(p.annotation.amount)}">
+      <rect x="-12" y="-7" width="24" height="14" rx="2" class="bill-rect"/>
+      <rect x="-9.5" y="-4.7" width="19" height="9.4" rx="1" class="bill-inner-border"/>
+      <circle cx="0" cy="0" r="4.3" class="bill-medallion"/>
+      <text x="0" y="1.6" text-anchor="middle" class="bill-d-letter">D</text>
+      <text x="-7.6" y="-2.6" text-anchor="middle" class="bill-corner-mark">$</text>
+      <text x="7.6" y="3.9" text-anchor="middle" class="bill-corner-mark">$</text>
     </g>`).join("");
 
   // $1M gridlines on the left, month markers along the bottom — opt-in only.
@@ -466,7 +470,10 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
 // "what's the level"; this answers "how did it move", which is what's
 // actually useful for an at-a-glance read.
 function cashMovementBarSVG(weeklyNet, weeksMeta, chartId, opts = {}) {
-  const W = opts.W || 280, H = opts.H || 50, padX = opts.padX ?? 3, padY = opts.padY ?? 5;
+  const showValueLabels = !!opts.showValueLabels;
+  const labelPad = showValueLabels ? 18 : 0; // extra room top & bottom so labels never clip
+  const W = opts.W || 280, H = opts.H || 50, padX = opts.padX ?? 3;
+  const padY = (opts.padY ?? 5) + labelPad;
   const n = weeklyNet.length;
   const distributionValues = opts.distributionValues || null;
   const allMags = weeklyNet.map(Math.abs);
@@ -489,6 +496,20 @@ function cashMovementBarSVG(weeklyNet, weeksMeta, chartId, opts = {}) {
     return `<rect x="${(p.x - barW / 2).toFixed(1)}" y="${Math.min(y, zeroY).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, Math.abs(zeroY - y)).toFixed(1)}" class="cm-bar ${cls}" data-idx="${p.i}"/>`;
   }).join("");
 
+  // Value labels — above the bar when positive (net inflow), below when
+  // negative (net outflow), compact-formatted, skipped for ~zero bars where
+  // there's nothing meaningful to label.
+  let valueLabelsHtml = "";
+  if (showValueLabels) {
+    valueLabelsHtml = points.filter((p) => Math.abs(p.net) >= 5000).map((p) => {
+      const barTop = Math.min(yFor(p.net), zeroY);
+      const barBottom = Math.max(yFor(p.net), zeroY);
+      const isPos = p.net >= 0;
+      const labelY = isPos ? barTop - 6 : barBottom + 13;
+      return `<text x="${p.x.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" class="cm-bar-value-label ${isPos ? "pos" : "neg"}">${fmtMoneyCompact(p.net)}</text>`;
+    }).join("");
+  }
+
   // Distributions plotted as a continuous line running through the bars —
   // dips below zero (since they're an outflow) at the weeks they occur, flat
   // at zero everywhere else, so it's immediately visible which bars had a
@@ -506,6 +527,7 @@ function cashMovementBarSVG(weeklyNet, weeksMeta, chartId, opts = {}) {
       <line x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${W - padX}" y2="${zeroY.toFixed(1)}" class="cm-bar-zero"/>
       ${bars}
       ${distHtml}
+      ${valueLabelsHtml}
       <rect class="urv-chart-hitbox" x="0" y="0" width="${W}" height="${H}" data-chart="${chartId}"/>
     </svg>
     <div class="urv-chart-tooltip" id="urv-tooltip-${chartId}"></div>
@@ -561,7 +583,7 @@ function openCashMovementModal(title, weeksMetaFull, weeklyOpeningFull, weeklyNe
     const weeklyDistribution = weeklyDistributionFull.slice(0, localWeeks);
     const hasDistributions = weeklyDistribution.some((v) => v);
 
-    const barChart = cashMovementBarSVG(weeklyNet, weeksMeta, "cm-modal-bar", { W: 820, H: 200, padX: 16, padY: 16, maxBarW: 56, distributionValues: weeklyDistribution, compact: true });
+    const barChart = cashMovementBarSVG(weeklyNet, weeksMeta, "cm-modal-bar", { W: 820, H: 240, padX: 16, padY: 16, maxBarW: 56, distributionValues: weeklyDistribution, compact: true, showValueLabels: true });
     const lineChart = urvSparklineSVG(weeklyClosing, weeksMeta, "cm-modal-line", { W: 820, H: 170, padX: 16, padY: 14, fromZero: false, compact: true, showAxes: true });
 
     host.querySelector("#cm-modal-sub").textContent = `${localWeeks}-week view`;
@@ -737,6 +759,20 @@ function openReceivablesScheduledModal(weeklyScheduled, weeksMeta) {
   });
 }
 
+// Standalone dollar-bill-with-D icon — same design as the distribution
+// markers on the Combined Cash Position chart, so the two visually read as
+// "this is the same thing" wherever distributions show up.
+function billIconSVG(size = 20) {
+  return `<svg viewBox="0 0 24 14" width="${size}" height="${size * (14 / 24)}" class="bill-icon-standalone">
+    <rect x="0.5" y="0.5" width="23" height="13" rx="2" class="bill-rect"/>
+    <rect x="3" y="2.8" width="18" height="8.4" rx="1" class="bill-inner-border"/>
+    <circle cx="12" cy="7" r="4.3" class="bill-medallion"/>
+    <text x="12" y="8.6" text-anchor="middle" class="bill-d-letter">D</text>
+    <text x="4.4" y="5.4" text-anchor="middle" class="bill-corner-mark">$</text>
+    <text x="19.6" y="10.6" text-anchor="middle" class="bill-corner-mark">$</text>
+  </svg>`;
+}
+
 function moneyBagSVG(pct, idSuffix) {
   const clipId = `bagclip-${idSuffix}`;
   const bagPath = "M36,22 C20,30 8,50 10,70 C12,92 30,106 50,106 C70,106 88,92 90,70 C92,50 80,30 64,22 L36,22 Z";
@@ -820,6 +856,7 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals, a
     <div class="stat-card kpi-card sc-open kpi-big-figure">
       <div class="kpi-big-figure-head"><div class="label">Opening Cash</div><div class="kpi-icon">◇</div></div>
       <div class="kpi-big-figure-value">${fmtMoney(totals.opening)}</div>
+      ${weeksMeta[0] ? `<div class="kpi-big-figure-date">As of ${fmtDateShort(weeksMeta[0].start)}</div>` : ""}
     </div>
     <div class="stat-card kpi-card kpi-net-card">
       <div class="kpi-icon">⇄</div>
@@ -841,9 +878,10 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals, a
     <div class="stat-card kpi-card sc-close kpi-big-figure">
       <div class="kpi-big-figure-head"><div class="label">Closing Cash</div><div class="kpi-icon">◆</div></div>
       <div class="kpi-big-figure-value brass">${fmtMoney(totals.closing)}</div>
+      ${weeksMeta.length ? `<div class="kpi-big-figure-date">As of ${fmtDateShort(weeksMeta[weeksMeta.length - 1].end)}</div>` : ""}
     </div>
     <div class="stat-card kpi-card sc-unc">
-      <div class="kpi-icon">↓</div>
+      <div class="kpi-icon kpi-icon-bill">${billIconSVG(20)}</div>
       <div class="kpi-body"><div class="label">Distributions</div><div class="value amber">${fmtMoney(distTotal)}</div></div>
       <div class="kpi-dist-list">
         ${distEntries.length
@@ -1071,8 +1109,8 @@ export function renderHome(store) {
     const openingDate = calc.weeks[0]?.week?.start;
     const closingDate = calc.weeks[calc.weeks.length - 1]?.week?.end;
     const chartId = `home-acct-${acct.id}`;
-    const weeklyNet = calc.weeks.map((w) => w.netCashflow);
-    const chart = cashMovementBarSVG(weeklyNet, weeksMetaForChart, chartId, { W: 280, H: 50, padX: 2, padY: 6, compact: true });
+    const weeklyClosingForCard = calc.weeks.map((w) => w.closing);
+    const chart = urvSparklineSVG(weeklyClosingForCard, weeksMetaForChart, chartId, { W: 280, H: 50, padX: 2, padY: 6, fromZero: false, compact: true });
 
     const fullWeeks = calcFullFor(acct.id);
     cardCharts.push({
@@ -1126,7 +1164,7 @@ export function renderHome(store) {
     });
   });
   for (const c of cardCharts) {
-    wireCashMovementHover(accountsHost, c.chartId, c.points, c.W, true);
+    wireUrvChartHover(accountsHost, c.chartId, c.points, c.W, { compact: true });
     const btn = accountsHost.querySelector(`.acct-action-detail[data-chart-id="${c.chartId}"]`);
     btn?.addEventListener("click", () => {
       openCashMovementModal(c.modalTitle, c.weeksMetaFull, c.weeklyOpeningFull, c.weeklyNetFull, c.weeklyClosingFull, c.weeklyDistributionFull);
