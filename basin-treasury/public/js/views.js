@@ -3,7 +3,7 @@ import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor, weekAmountFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone, interestForAccount,
-  UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice,
+  UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice, unbilledRevenueOccurrencesInPeriod,
   ACCOUNTS, accountName, computeForecastForAccount, computeSimpleAccountForecast,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
@@ -1529,6 +1529,21 @@ function renderUnbilledRevenueSections(store, period) {
   const host = document.getElementById("urv-sections");
   if (!host) return;
   const list = state.unbilledRevenue || [];
+
+  // Breakdown: total scheduled (CF date assigned) per section, within
+  // whichever view — 6 or 13 weeks — is currently active.
+  const breakdownHost = document.getElementById("urv-breakdown");
+  if (breakdownHost) {
+    const occurrences = unbilledRevenueOccurrencesInPeriod(state, period).filter((occ) => occ.wi < cfViewWeeks);
+    const totalsBySection = {};
+    for (const sec of UNBILLED_REVENUE_SECTIONS) totalsBySection[sec.id] = 0;
+    for (const occ of occurrences) totalsBySection[occ.section] = (totalsBySection[occ.section] || 0) + occ.amount;
+    breakdownHost.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => `
+      <div class="stat-card">
+        <div class="label">${escapeHtml(sec.label)}</div>
+        <div class="value">${fmtMoney(totalsBySection[sec.id])}</div>
+      </div>`).join("");
+  }
 
   host.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => {
     const items = list.filter((i) => i.section === sec.id && i.status !== "deleted");
