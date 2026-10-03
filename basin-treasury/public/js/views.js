@@ -360,6 +360,31 @@ function sliceTotals(weeks) {
 }
 
 // Same idea, for the 4 simplified accounts.
+function urvSparklineSVG(values, weeksMeta) {
+  const W = 280, H = 72, padX = 8, padY = 10;
+  const n = values.length;
+  const max = Math.max(...values, 1); // avoid divide-by-zero when every week is $0
+  const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
+  const points = values.map((v, i) => ({
+    x: padX + i * stepX,
+    y: H - padY - (v / max) * (H - padY * 2),
+    v, i,
+  }));
+  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const baseline = H - padY;
+  const areaD = `${pathD} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
+  const dots = points.map((p) => {
+    const wk = weeksMeta[p.i];
+    const label = wk ? `Week of ${fmtDateShort(wk.start)}: ${fmtMoney(p.v)}` : fmtMoney(p.v);
+    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="urv-chart-dot"><title>${escapeHtml(label)}</title></circle>`;
+  }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="urv-sparkline" preserveAspectRatio="xMidYMid meet">
+    <path d="${areaD}" class="urv-chart-area"/>
+    <path d="${pathD}" class="urv-chart-line"/>
+    ${dots}
+  </svg>`;
+}
+
 function sliceSimpleTotals(weeks) {
   return {
     opening: weeks[0]?.opening ?? 0,
@@ -1442,71 +1467,18 @@ function renderARRows(store, period) {
 
 /* ============================================================ UNBILLED RECEIVABLES ============================================================ */
 
-let ubFilter = "open", ubSearch = "", ubCustomerFilter = "", ubWindowFilter = "";
-let ubSortBy = "customer", ubSortDir = "asc";
+
 const BILL_PERCENTS = [25, 50, 75, 90, 100, 110];
 
 export function renderUnbilled(store) {
   const { state } = store;
   const period = state.periods.find((p) => p.id === state.activePeriodId) || state.periods[0];
-  const weeks = periodWeeks(period).slice(0, cfViewWeeks);
-  const list0 = state.unbilledReceivables || [];
-
-  const openList = list0.filter((u) => u.status === "open");
-  const totalUB = list0.reduce((a, u) => a + u.balance, 0);
-  const openUB = openList.reduce((a, u) => a + u.balance, 0);
-
-  document.getElementById("ub-meta").textContent = `Project revenue forecast — not yet in NetSuite's Aged AR · ${list0.length} lines · ${openList.length} open`;
-  document.getElementById("ub-stats").innerHTML = `
-    <div class="stat-card"><div class="label">Total Unbilled</div><div class="value">${fmtMoney(totalUB)}</div></div>
-    <div class="stat-card"><div class="label">Open</div><div class="value">${fmtMoney(openUB)}</div></div>
-    <div class="stat-card sc-in"><div class="label">Scheduled This Period</div><div class="value green">${fmtMoney(weeks.reduce((a, w) => a + openList.filter((u) => weekIndexForDate(period, u.cfDate) === w.index).reduce((s, u) => s + u.balance, 0), 0))}</div></div>
-  `;
-
-  const insightsHost = document.getElementById("ub-insights");
-  insightsHost.innerHTML = `<button type="button" class="insight-btn" id="ub-insight-customers"><span class="icon">🏆</span>Top 5 Customer Balances<span class="arrow">▸</span></button>`;
-  document.getElementById("ub-insight-customers").onclick = () => openTopUnbilledCustomersModal(openList);
-
-  document.querySelectorAll("#ub-status-tabs button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.f === ubFilter);
-    b.onclick = () => { ubFilter = b.dataset.f; store.render(); };
-  });
-  document.getElementById("ub-search").value = ubSearch;
-  document.getElementById("ub-search").oninput = (e) => { ubSearch = e.target.value.toLowerCase(); renderUnbilledRows(store, period); };
-
-  const custSel = document.getElementById("ub-customer-filter");
-  const customers = Array.from(new Set(list0.map((u) => u.customer))).sort((a, b) => customerSortKey(a).localeCompare(customerSortKey(b)));
-  custSel.innerHTML = `<option value="">All Customers</option>${customers.map((c) => `<option value="${escapeHtml(c)}" ${c === ubCustomerFilter ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}`;
-  custSel.onchange = () => { ubCustomerFilter = custSel.value; renderUnbilledRows(store, period); };
-
-  document.getElementById("ub-window-filter").value = ubWindowFilter;
-  document.getElementById("ub-window-filter").onchange = (e) => { ubWindowFilter = e.target.value; renderUnbilledRows(store, period); };
-
-  document.getElementById("ub-import-btn").onclick = () => document.getElementById("file-input-ub").click();
-  document.getElementById("ub-add-btn").onclick = () => openManualUnbilledModal(store);
-  document.getElementById("ub-clear-btn").onclick = () => {
-    if (!list0.length) { toast("Unbilled Receivables are already empty", "info"); return; }
-    if (!confirm(`Delete all ${list0.length} unbilled lines? This can't be undone. Customer auto-schedule settings will be kept.`)) return;
-    store.mutate((s) => { s.unbilledReceivables.forEach((x) => recordTombstone(s, "unbilledReceivables", x.id)); s.unbilledReceivables = []; });
-    toast("All unbilled receivables cleared — customer auto-schedule settings kept", "success");
-  };
-
-  renderUnbilledRows(store, period);
+  // The old project-revenue-forecast list (Total Unbilled / Open / Scheduled
+  // stats, Top 5 Customers, search/filter table) has been removed from this
+  // page per request — it wasn't being used. Its underlying data
+  // (state.unbilledReceivables) and its contribution to Receivables Collected
+  // on CF Forecast are untouched; only this page's UI for it is gone.
   renderUnbilledRevenueSections(store, period);
-}
-
-function openTopUnbilledCustomersModal(openList) {
-  const byCustomer = {};
-  for (const u of openList) byCustomer[u.customer] = (byCustomer[u.customer] || 0) + u.balance;
-  const ranked = Object.entries(byCustomer).sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const rows = ranked.map(([c, amt], i) => `
-    <div class="vendor-rank"><span><span class="n">${i + 1}</span>${escapeHtml(c)}</span><span class="amt">${fmtMoney(amt)}</span></div>
-  `).join("") || `<div class="meta">No open unbilled lines yet.</div>`;
-  openModal(`
-    <button type="button" class="modal-close-x" id="insight-close">✕</button>
-    <h3>🏆 Top 5 Customer Balances — Unbilled</h3>
-    ${rows}
-  `, { onMount: (host) => { host.querySelector("#insight-close").onclick = closeModal; } });
 }
 
 function urvInvoiceCell(item, idx) {
@@ -1530,19 +1502,28 @@ function renderUnbilledRevenueSections(store, period) {
   if (!host) return;
   const list = state.unbilledRevenue || [];
 
-  // Breakdown: total scheduled (CF date assigned) per section, within
-  // whichever view — 6 or 13 weeks — is currently active.
+  // Breakdown: a line chart per section, one point per week, scoped to
+  // whichever view — 6 or 13 weeks — is currently active. Hover any point
+  // for that week's figure (native SVG tooltip); the period total sits below.
   const breakdownHost = document.getElementById("urv-breakdown");
   if (breakdownHost) {
+    const weeksMeta = periodWeeks(period).slice(0, cfViewWeeks);
     const occurrences = unbilledRevenueOccurrencesInPeriod(state, period).filter((occ) => occ.wi < cfViewWeeks);
-    const totalsBySection = {};
-    for (const sec of UNBILLED_REVENUE_SECTIONS) totalsBySection[sec.id] = 0;
-    for (const occ of occurrences) totalsBySection[occ.section] = (totalsBySection[occ.section] || 0) + occ.amount;
-    breakdownHost.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => `
-      <div class="stat-card">
+    const weeklyBySection = {};
+    for (const sec of UNBILLED_REVENUE_SECTIONS) weeklyBySection[sec.id] = Array(cfViewWeeks).fill(0);
+    for (const occ of occurrences) weeklyBySection[occ.section][occ.wi] += occ.amount;
+
+    breakdownHost.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => {
+      const weekly = weeklyBySection[sec.id];
+      const periodTotal = sum(weekly);
+      return `
+      <div class="urv-chart-card">
         <div class="label">${escapeHtml(sec.label)}</div>
-        <div class="value">${fmtMoney(totalsBySection[sec.id])}</div>
-      </div>`).join("");
+        ${urvSparklineSVG(weekly, weeksMeta)}
+        <div class="urv-chart-total">${fmtMoney(periodTotal)}</div>
+        <div class="urv-chart-sub">scheduled over ${cfViewWeeks} weeks</div>
+      </div>`;
+    }).join("");
   }
 
   host.innerHTML = UNBILLED_REVENUE_SECTIONS.map((sec) => {
@@ -1724,174 +1705,6 @@ function openUrvRenameModal(store, itemId) {
         store.mutate((s) => {
           const it = s.unbilledRevenue.find((i) => i.id === itemId);
           it.name = name; it.lastEditBy = store.initials(); it.updatedAt = new Date().toISOString();
-        });
-        closeModal();
-      };
-    },
-  });
-}
-
-function renderUnbilledRows(store, period) {
-  const { state } = store;
-  let list = state.unbilledReceivables || [];
-  if (ubFilter === "open") list = list.filter((u) => u.status === "open");
-  if (ubFilter === "closed") list = list.filter((u) => u.status === "closed");
-  if (ubSearch) list = list.filter((u) => `${u.projectNumber || ""} ${u.project || ""} ${u.customer || ""}`.toLowerCase().includes(ubSearch));
-  if (ubCustomerFilter) list = list.filter((u) => u.customer === ubCustomerFilter);
-  if (ubWindowFilter) list = list.filter((u) => u.forecastWindow === ubWindowFilter);
-  list = list.slice().sort((a, b) => {
-    let cmp;
-    if (ubSortBy === "date") cmp = (a.date || "").localeCompare(b.date || "");
-    else cmp = customerSortKey(a.customer).localeCompare(customerSortKey(b.customer));
-    if (cmp === 0) cmp = customerSortKey(a.customer).localeCompare(customerSortKey(b.customer)) || (a.date || "").localeCompare(b.date || "");
-    return ubSortDir === "desc" ? -cmp : cmp;
-  });
-
-  document.querySelectorAll('#ub-table th.sortable').forEach((th) => {
-    const arrow = th.querySelector(".sort-arrow");
-    if (th.dataset.sort === ubSortBy) { arrow.textContent = ubSortDir === "asc" ? "▲" : "▼"; th.classList.add("sorted"); }
-    else { arrow.textContent = ""; th.classList.remove("sorted"); }
-    th.onclick = () => {
-      if (ubSortBy === th.dataset.sort) ubSortDir = ubSortDir === "asc" ? "desc" : "asc";
-      else { ubSortBy = th.dataset.sort; ubSortDir = "asc"; }
-      renderUnbilledRows(store, period);
-    };
-  });
-
-  document.getElementById("ub-count").textContent = `${list.length} rows`;
-  const tbody = document.getElementById("ub-tbody");
-  if (!list.length) { tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><h4>No unbilled receivables yet</h4>Import a project revenue forecast, or add a line manually.</div></td></tr>`; return; }
-
-  tbody.innerHTML = list.map((u) => {
-    const days = u.date ? Math.round((parseISO(u.cfDate || u.date) - parseISO(u.date)) / 86400000) : "";
-    const whoBadge = u.lastEditBy ? `<span class="who-inline" title="Last edited by ${escapeHtml(u.lastEditBy)}">${escapeHtml(u.lastEditBy)}</span>` : "";
-    const daysVal = u.uncertain ? "unc" : (u.daysOverride ?? days);
-    const windowBadge = u.forecastWindow ? `<span class="window-badge">${u.forecastWindow === "4wk" ? "4-WK" : "8-WK"}</span>` : "—";
-    return `<tr class="${u.status === "closed" ? "paid" : ""} ${u.uncertain ? "uncertain-row" : ""}" data-id="${u.id}">
-      <td class="name">${escapeHtml(u.customer || "—")}</td>
-      <td>${u.projectNumber ? `<span class="mono" style="color:var(--text-dim);">${escapeHtml(u.projectNumber)}</span> ` : ""}${escapeHtml(u.project || "—")}</td>
-      <td>${windowBadge}</td>
-      <td class="mono">${fmtDate(u.date)}</td>
-      <td>
-        <select class="mini-select bill-pct">
-          ${BILL_PERCENTS.map((p) => `<option value="${p}" ${Number(u.billPercent) === p ? "selected" : ""}>${p}%</option>`).join("")}
-        </select>
-      </td>
-      <td><input class="mini-input days-input ${u.uncertain ? "uncertain" : ""}" type="text" value="${daysVal}" title="Type a number of days, or 'unc' if the date is uncertain" ${u.status !== "open" ? "disabled" : ""}/></td>
-      <td class="mono cf-date">${u.uncertain ? `<span class="uncertain-tag">UNCERTAIN</span>` : (u.cfDate ? fmtDate(u.cfDate) : "—")}${whoBadge}</td>
-      <td class="num balance-cell" title="Click to correct this line's amount directly">${fmtMoney(u.balance)}${u.originalBalance && u.originalBalance !== u.balance ? `<div class="partial-note" style="color:var(--text-dim);">${fmtMoney(u.originalBalance)} at 100%</div>` : ""}</td>
-      <td><span class="badge ${u.status === "open" ? "open" : "paid"}">${u.status}</span></td>
-      <td>
-        <button class="mini-btn toggle-status">${u.status === "open" ? "Mark Closed" : "Reopen"}</button>
-        <button class="mini-btn del-row" style="margin-left:4px;">✕</button>
-      </td>
-    </tr>`;
-  }).join("");
-
-  tbody.querySelectorAll("tr").forEach((tr) => {
-    const id = tr.dataset.id;
-    const rec = (state.unbilledReceivables || []).find((x) => x.id === id);
-    if (!rec) return;
-    attachItemNotePencil(tr.querySelector(".name"), store, "unbilledReceivables", id);
-
-    tr.querySelector(".bill-pct")?.addEventListener("change", (e) => {
-      const pct = Number(e.target.value);
-      store.mutate((s) => {
-        const item = s.unbilledReceivables.find((x) => x.id === id);
-        item.billPercent = pct;
-        item.balance = Math.round((item.originalBalance ?? item.balance) * (pct / 100) * 100) / 100;
-        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
-      });
-    });
-    tr.querySelector(".days-input")?.addEventListener("change", (e) => {
-      const raw = e.target.value.trim();
-      store.mutate((s) => {
-        const item = s.unbilledReceivables.find((x) => x.id === id);
-        if (raw.toLowerCase() === "unc") {
-          item.uncertain = true;
-          item.daysOverride = null;
-          item.cfDate = null;
-        } else {
-          const days = raw === "" ? null : Number(raw);
-          item.uncertain = false;
-          item.daysOverride = days;
-          item.cfDate = (days === null || days === 0 || Number.isNaN(days)) ? null : toISO(addDays(item.date, days));
-        }
-        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
-      });
-    });
-    tr.querySelector(".toggle-status")?.addEventListener("click", () => {
-      store.mutate((s) => {
-        const item = s.unbilledReceivables.find((x) => x.id === id);
-        item.status = item.status === "open" ? "closed" : "open";
-        item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
-      });
-    });
-    tr.querySelector(".balance-cell")?.addEventListener("click", () => {
-      const td = tr.querySelector(".balance-cell");
-      const current = (state.unbilledReceivables.find((x) => x.id === id) || {}).balance ?? 0;
-      const input = document.createElement("input");
-      input.type = "number"; input.step = "0.01"; input.className = "mini-input"; input.style.width = "100px"; input.style.textAlign = "right";
-      input.value = current;
-      td.innerHTML = ""; td.appendChild(input); input.focus(); input.select();
-      const commit = () => {
-        const val = parseFloat(input.value);
-        store.mutate((s) => {
-          const item = s.unbilledReceivables.find((x) => x.id === id);
-          if (!item || Number.isNaN(val) || val < 0) return;
-          item.balance = Math.round(val * 100) / 100; // manual override — no longer tied to the bill % multiplier
-          item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
-        });
-      };
-      input.addEventListener("keydown", (e2) => { if (e2.key === "Enter") input.blur(); if (e2.key === "Escape") { input.value = current; input.blur(); } });
-      input.addEventListener("blur", commit, { once: true });
-    });
-    tr.querySelector(".del-row")?.addEventListener("click", () => {
-      if (!confirm(`Remove this unbilled line for ${rec.customer}${rec.project ? " · " + rec.project : ""}?`)) return;
-      store.mutate((s) => { recordTombstone(s, "unbilledReceivables", id); s.unbilledReceivables = s.unbilledReceivables.filter((x) => x.id !== id); });
-    });
-    tr.querySelector(".cf-date")?.addEventListener("click", () => {
-      const input = document.createElement("input");
-      input.type = "date"; input.className = "mini-input"; input.style.width = "128px";
-      input.value = rec.cfDate || "";
-      const td = tr.querySelector(".cf-date");
-      td.innerHTML = ""; td.appendChild(input); input.focus();
-      if (input.showPicker) { try { input.showPicker(); } catch { /* ignore */ } }
-      input.addEventListener("blur", () => {
-        store.mutate((s) => {
-          const item = s.unbilledReceivables.find((x) => x.id === id);
-          item.cfDate = input.value || null;
-          if (input.value) item.uncertain = false;
-          item.lastEditBy = store.initials(); item.updatedAt = new Date().toISOString();
-        });
-      }, { once: true });
-    });
-  });
-}
-
-function openManualUnbilledModal(store) {
-  openModal(`
-    <h3>Add Unbilled Line</h3>
-    <div class="row"><label>Customer</label><input id="ub-m-customer" placeholder="Drives auto-schedule, same as Existing AR" /></div>
-    <div class="row"><label>Project</label><input id="ub-m-project" /></div>
-    <div class="row"><label>Invoice Date</label><input id="ub-m-date" type="date" value="${todayISO()}" /></div>
-    <div class="row"><label>Forecast Amount (100%)</label><input id="ub-m-amt" type="number" /></div>
-    <div class="row"><label>Bill %</label>
-      <select id="ub-m-pct">${BILL_PERCENTS.map((p) => `<option value="${p}" ${p === 100 ? "selected" : ""}>${p}%</option>`).join("")}</select>
-    </div>
-    <div class="modal-actions"><button class="btn-ghost" id="ub-m-cancel">Cancel</button><button class="btn-primary" id="ub-m-save" style="width:auto;">Add</button></div>
-  `, {
-    onMount: (host) => {
-      host.querySelector("#ub-m-cancel").onclick = closeModal;
-      host.querySelector("#ub-m-save").onclick = () => {
-        const customer = host.querySelector("#ub-m-customer").value.trim();
-        const project = host.querySelector("#ub-m-project").value.trim();
-        const date = host.querySelector("#ub-m-date").value;
-        const originalBalance = parseFloat(host.querySelector("#ub-m-amt").value || "0");
-        const billPercent = Number(host.querySelector("#ub-m-pct").value);
-        if (!customer || !date || !originalBalance) { toast("Fill in customer, date, and amount", "error"); return; }
-        store.mutate((s) => {
-          createUnbilledLines(s, [{ customer, project, date, originalBalance, billPercent, source: "manual" }]);
         });
         closeModal();
       };
