@@ -188,6 +188,28 @@ try {
   try {
     execSync(`node --check "${tmpFile}"`, { stdio: "pipe" });
     ok("combined bundle parses cleanly as a real ES module (no duplicate top-level declarations)");
+
+    // ---------- 7. ESLint no-undef — catches cross-scope variable-name mix-ups ----------
+    // A second real, recurring bug class: a variable correctly scoped in one
+    // function gets referenced by a similarly-named but different variable in
+    // another function during a refactor (netTotal, then weeksMetaFull vs
+    // weeksMetaForChart). node --check cannot catch this — it's a reference
+    // error, not a syntax error. ESLint's no-undef rule tracks real variable
+    // scope and catches it. Caught this exact bug class twice before this
+    // check existed.
+    console.log("\n=== 7. ESLint no-undef (catches cross-scope variable-name mix-ups) ===");
+    try {
+      const eslintConfig = path.join(root, "scripts", "eslint-undef-config.mjs");
+      execSync(`npx --yes eslint --no-config-lookup --config "${eslintConfig}" "${tmpFile}"`, { stdio: "pipe", timeout: 60000 });
+      ok("no undefined-variable references in the combined bundle");
+    } catch (e) {
+      const out = (e.stdout?.toString() || "") + (e.stderr?.toString() || "");
+      if (/ENOTFOUND|ETIMEDOUT|network|could not resolve/i.test(out) || e.signal === "SIGTERM") {
+        console.log("WARN: could not reach npm registry to run ESLint — skipping this check this run (not a code failure)");
+      } else {
+        fail(`ESLint found undefined-variable references that would crash at runtime:\n${out}`);
+      }
+    }
   } catch (e) {
     fail(`the combined single-file bundle has a module-parsing error that would crash in the browser:\n${e.stderr?.toString() || e.message}`);
   } finally {
