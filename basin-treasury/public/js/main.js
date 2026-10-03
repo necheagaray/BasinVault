@@ -206,8 +206,12 @@ async function boot() {
     setSyncPill("ok", `synced ${shortTime(remote.updatedAt) || "now"}`);
     startPolling();
   } catch (err) {
-    if (err.code === 401) return showLogin();
-    toast("Could not load the vault. Check your connection and refresh.", "error", 8000);
+    console.error("Boot failed:", err);
+    if (err.code === 401) {
+      toast("Your session expired — please log in again.", "error", 6000);
+      return showLogin();
+    }
+    toast(`Could not load the vault: ${err.message || "unknown error"}`, "error", 15000);
   }
 }
 
@@ -238,6 +242,7 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
     await api.login(username, password);
     await boot();
   } catch (err) {
+    console.error("Login failed:", err);
     errEl.textContent = err.message || "Login failed";
   } finally {
     btn.disabled = false; btn.textContent = "Unlock Vault";
