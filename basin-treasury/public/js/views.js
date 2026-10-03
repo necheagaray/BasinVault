@@ -459,77 +459,6 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
   return { html, points, W, H };
 }
 
-// Combined Inflow/Outflow/Net chart — three series sharing one set of axes
-// and a zero-line, so they read as one visual rather than three separate charts.
-// One bar per week — Net cashflow only. Green above the zero-line when
-// positive, red below when negative. Nothing else competing for attention;
-// hover reveals the Inflow/Outflow split behind that week's number.
-function cfNetBarChartSVG(weeklyInflow, weeklyOutflow, weeklyNet, weeksMeta, chartId, opts = {}) {
-  const W = opts.W || 900, H = opts.H || 190, padX = opts.padX ?? 18, padY = opts.padY ?? 16;
-  const n = weeklyNet.length;
-  const maxMag = Math.max(...weeklyNet.map(Math.abs), 1);
-  const lo = -maxMag, hi = maxMag, range = hi - lo;
-  const stepX = n > 1 ? (W - padX * 2) / (n - 1) : 0;
-  const yFor = (v) => H - padY - ((v - lo) / range) * (H - padY * 2);
-  const zeroY = yFor(0);
-  const barW = Math.max(10, Math.min(44, stepX * 0.6));
-
-  const weekLabel = (i) => weeksMeta[i] ? `Week of ${fmtDateShort(weeksMeta[i].start)}` : `Week ${i + 1}`;
-
-  const bars = weeklyNet.map((net, i) => {
-    const x = padX + i * stepX;
-    const y = yFor(net);
-    const cls = net >= 0 ? "cf-net-bar-pos" : "cf-net-bar-neg";
-    return `<rect x="${(x - barW / 2).toFixed(1)}" y="${Math.min(y, zeroY).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(1, Math.abs(zeroY - y)).toFixed(1)}" class="cf-net-bar ${cls}" data-idx="${i}"/>`;
-  }).join("");
-
-  const html = `<div class="urv-chart-wrap cf-combo-wrap" data-chart="${chartId}">
-    <svg viewBox="0 0 ${W} ${H}" class="urv-sparkline cf-combo-svg" preserveAspectRatio="none">
-      <line x1="${padX}" y1="${zeroY.toFixed(1)}" x2="${W - padX}" y2="${zeroY.toFixed(1)}" class="cf-combo-zero"/>
-      ${bars}
-      <line class="urv-chart-vline" x1="0" y1="${padY - 4}" x2="0" y2="${H - padY}"/>
-      <rect class="urv-chart-hitbox" x="0" y="0" width="${W}" height="${H}" data-chart="${chartId}"/>
-    </svg>
-  </div>`;
-  const points = weeklyNet.map((net, i) => ({ i, inflow: weeklyInflow[i], outflow: weeklyOutflow[i], net, x: padX + i * stepX, label: weekLabel(i) }));
-  return { html, W, H, points };
-}
-
-// Hover wiring — updates a FIXED info readout (never clips or overlaps,
-// unlike a tooltip that follows the cursor) with all three values for
-// whichever week is nearest the cursor.
-function wireCfComboHover(host, chartId, points, W, infoElId, compact) {
-  const wrap = host.querySelector(`.urv-chart-wrap[data-chart="${chartId}"]`);
-  const infoEl = document.getElementById(infoElId);
-  if (!wrap || !infoEl) return;
-  const svg = wrap.querySelector(".urv-sparkline");
-  const hitbox = wrap.querySelector(".urv-chart-hitbox");
-  const vline = wrap.querySelector(".urv-chart-vline");
-  const fmt = compact ? fmtMoneyCompact : fmtMoney;
-  const defaultHtml = infoEl.innerHTML;
-
-  const showNearest = (clientX) => {
-    const rect = svg.getBoundingClientRect();
-    const svgX = ((clientX - rect.left) / rect.width) * W;
-    let nearest = points[0], minDist = Infinity;
-    for (const p of points) { const d = Math.abs(p.x - svgX); if (d < minDist) { minDist = d; nearest = p; } }
-    svg.querySelectorAll(".cf-net-bar").forEach((b) => b.classList.toggle("active", Number(b.dataset.idx) === nearest.i));
-    vline.setAttribute("x1", nearest.x); vline.setAttribute("x2", nearest.x);
-    vline.style.display = "block";
-    infoEl.innerHTML = `<span class="cf-hover-week">${escapeHtml(nearest.label)}</span>
-      <span class="cf-combo-legend-item"><span class="dot" style="background:var(--green);"></span>In <b class="green">${fmt(nearest.inflow)}</b></span>
-      <span class="cf-combo-legend-item"><span class="dot" style="background:var(--red);"></span>Out <b class="red">${fmt(nearest.outflow)}</b></span>
-      <span class="cf-combo-legend-item"><span class="dot" style="background:var(--brass-bright);"></span>Net <b class="${nearest.net >= 0 ? "green" : "red"}">${fmt(nearest.net)}</b></span>`;
-  };
-  const hide = () => {
-    svg.querySelectorAll(".cf-net-bar").forEach((b) => b.classList.remove("active"));
-    vline.style.display = "none";
-    infoEl.innerHTML = defaultHtml;
-  };
-  hitbox.addEventListener("mousemove", (e) => showNearest(e.clientX));
-  hitbox.addEventListener("mouseleave", hide);
-}
-
 // Hover anywhere over a chart's hitbox and snap to whichever week's point is
 // nearest the cursor's x position — no need to land precisely on a dot.
 function moneyBagSVG(pct, idSuffix) {
@@ -596,24 +525,31 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals) {
   const miniChart = (values, key, fromZero) => urvSparklineSVG(values, weeksMeta, `${chartPrefix}-${key}`, { W: 150, H: 36, padX: 3, padY: 4, fromZero });
 
   const closeChart = miniChart(weekly.closing, "close", false);
-  const comboChart = cfNetBarChartSVG(weekly.inflow, weekly.outflow, weekly.net, weeksMeta, `${chartPrefix}-combo`, { W: 620, H: 170, padX: 14, padY: 14 });
-  const legendId = `${chartPrefix}-combo-legend`;
-
   const distTotal = sum(weekly.distribution || []);
   const distChart = miniChart((weekly.distribution || []).map((v) => Math.abs(v)), "dist", true);
+
+  // No chart here — just the number, a clean ratio bar showing the split
+  // between Inflow and Outflow, and both figures underneath.
+  const inAbs = Math.abs(totals.inflow), outAbs = Math.abs(totals.outflow);
+  const magSum = inAbs + outAbs || 1;
+  const inPct = (inAbs / magSum) * 100;
 
   host.innerHTML = `
     <div class="stat-card kpi-card sc-open">
       <div class="kpi-icon">◇</div>
       <div class="kpi-body"><div class="label">Opening Cash</div><div class="value">${fmtMoney(totals.opening)}</div></div>
     </div>
-    <div class="stat-card kpi-card cf-combo-card">
-      <div class="cf-combo-legend" id="${legendId}">
-        <span class="cf-combo-legend-item"><span class="dot" style="background:var(--green);"></span>Inflows <b class="green">${fmtMoney(totals.inflow)}</b></span>
-        <span class="cf-combo-legend-item"><span class="dot" style="background:var(--red);"></span>Outflows <b class="red">${fmtMoney(totals.outflow)}</b></span>
-        <span class="cf-combo-legend-item"><span class="dot" style="background:var(--brass-bright);"></span>Net <b class="${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal)}</b></span>
+    <div class="stat-card kpi-card kpi-net-card">
+      <div class="kpi-icon">⇄</div>
+      <div class="kpi-body">
+        <div class="label">Net Cashflow</div>
+        <div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal, { signed: true })}</div>
       </div>
-      ${comboChart.html}
+      <div class="kpi-net-ratio-bar"><div class="kpi-net-ratio-in" style="width:${inPct.toFixed(1)}%"></div><div class="kpi-net-ratio-out" style="width:${(100 - inPct).toFixed(1)}%"></div></div>
+      <div class="kpi-net-sub-row">
+        <span class="kpi-net-sub in">↗ In <b>${fmtMoney(totals.inflow)}</b></span>
+        <span class="kpi-net-sub out">↘ Out <b>${fmtMoney(totals.outflow)}</b></span>
+      </div>
     </div>
     <div class="stat-card kpi-card sc-close">
       <div class="kpi-icon">◆</div>
@@ -626,7 +562,6 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals) {
       <div class="kpi-mini-chart">${distChart.html}</div>
     </div>
   `;
-  wireCfComboHover(host, `${chartPrefix}-combo`, comboChart.points, comboChart.W, legendId, true);
   wireUrvChartHover(host, `${chartPrefix}-close`, closeChart.points, closeChart.W);
   wireUrvChartHover(host, `${chartPrefix}-dist`, distChart.points, distChart.W);
 }

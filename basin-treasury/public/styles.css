@@ -455,18 +455,28 @@ select.period-select{
 .kpi-card.sc-net .urv-chart-line{ stroke:var(--brass); } .kpi-card.sc-net .urv-chart-dot{ fill:var(--brass); }
 .kpi-card.sc-close .urv-chart-line{ stroke:var(--brass-bright); } .kpi-card.sc-close .urv-chart-dot{ fill:var(--brass-bright); }
 
-.cf-combo-card{ grid-column:1 / -1; min-height:240px; }
-.cf-combo-legend{ display:flex; gap:22px; flex-wrap:wrap; align-items:center; position:relative; z-index:1; margin-bottom:12px; min-height:20px; }
-.cf-combo-legend-item{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--text-dim); font-family:var(--font-mono); }
-.cf-combo-legend-item .dot{ width:8px; height:8px; border-radius:50%; display:inline-block; flex-shrink:0; }
-.cf-combo-legend-item b{ font-size:15px; margin-left:1px; }
-.cf-hover-week{ font-family:var(--font-mono); font-size:11px; color:var(--brass-bright); font-weight:700; margin-right:4px; }
-.cf-combo-wrap .urv-sparkline{ height:170px; overflow:visible; }
-.cf-combo-zero{ stroke:var(--line-bright); stroke-width:1; stroke-dasharray:2,3; }
-.cf-net-bar{ rx:3; transition:opacity .15s, filter .15s; opacity:0.88; }
-.cf-net-bar-pos{ fill:var(--green); }
-.cf-net-bar-neg{ fill:var(--red); }
-.cf-net-bar.active{ opacity:1; filter:brightness(1.25); }
+.kpi-net-card{ display:flex; flex-direction:column; position:relative; overflow:hidden; }
+.kpi-net-card::before{
+  content:""; position:absolute; top:-40%; right:-20%; width:140px; height:140px; border-radius:50%;
+  background:radial-gradient(circle, rgba(230,195,126,0.12) 0%, transparent 70%); pointer-events:none;
+}
+.kpi-net-ratio-bar{
+  display:flex; height:9px; border-radius:6px; overflow:hidden; margin:12px 0 10px; position:relative; z-index:1;
+  background:var(--bg-deep); box-shadow:inset 0 1px 3px rgba(0,0,0,0.6), 0 0 0 1px var(--line);
+}
+.kpi-net-ratio-in{
+  background:linear-gradient(90deg, #238a56, var(--green)); box-shadow:0 0 10px 0 rgba(79,214,148,0.55);
+  transition:width .6s cubic-bezier(.34,1.2,.64,1);
+}
+.kpi-net-ratio-out{
+  background:linear-gradient(90deg, var(--red), #c2493b); box-shadow:0 0 10px 0 rgba(239,111,92,0.5);
+  transition:width .6s cubic-bezier(.34,1.2,.64,1);
+}
+.kpi-net-sub-row{ display:flex; justify-content:space-between; gap:12px; margin-top:auto; position:relative; z-index:1; }
+.kpi-net-sub{ font-family:var(--font-mono); font-size:11px; display:flex; align-items:center; gap:4px; white-space:nowrap; }
+.kpi-net-sub b{ font-size:12.5px; font-weight:700; }
+.kpi-net-sub.in{ color:var(--green); } .kpi-net-sub.in b{ color:var(--green); text-shadow:0 0 10px rgba(79,214,148,0.4); }
+.kpi-net-sub.out{ color:var(--red); } .kpi-net-sub.out b{ color:var(--red); text-shadow:0 0 10px rgba(239,111,92,0.35); }
 
 /* ===================== CF FORECAST GRID ===================== */
 .cf-table-wrap{
