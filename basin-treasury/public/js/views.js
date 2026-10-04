@@ -387,11 +387,21 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
   const padX = (opts.padX ?? 8) + axisPadLeft, padY = opts.padY ?? 10;
   const plotBottom = H - padY - axisPadBottom;
   const n = values.length;
-  // fromZero:false scales min-to-max instead of 0-to-max — matters for large,
-  // relatively stable balances, where scaling from zero would flatten real
-  // week-to-week variation into a nearly invisible line.
-  const lo = opts.fromZero === false ? Math.min(...values) : 0;
-  const hi = Math.max(...values, lo + 1); // avoid divide-by-zero when flat
+  const dataMax = Math.max(...values);
+  let lo, hi;
+  if (opts.axisFloor) {
+    // A true $0 baseline with a guaranteed minimum ceiling (rounded up to
+    // the nearest $1M) — gives a grounded, familiar scale with gridlines at
+    // every million, regardless of how narrow the actual data range is.
+    lo = 0;
+    hi = Math.max(opts.axisFloor, Math.ceil(dataMax / 1000000) * 1000000, 1);
+  } else {
+    // fromZero:false scales min-to-max instead of 0-to-max — matters for
+    // large, relatively stable balances, where scaling from zero would
+    // flatten real week-to-week variation into a nearly invisible line.
+    lo = opts.fromZero === false ? Math.min(...values) : 0;
+    hi = Math.max(dataMax, lo + 1); // avoid divide-by-zero when flat
+  }
   const range = hi - lo;
   const stepX = n > 1 ? (W - padX - (opts.padX ?? 8)) / (n - 1) : 0;
   // opts.annotations: [{ wi, amount, label }] — e.g. a distribution that
@@ -412,14 +422,9 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
   const baseline = plotBottom;
   const areaD = `${pathD} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
   const dots = points.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="urv-chart-dot" data-idx="${p.i}"/>`).join("");
-  const markers = points.filter((p) => p.annotation).map((p) => `
-    <g class="urv-outflow-marker" transform="translate(${p.x.toFixed(1)},${(p.y + 14).toFixed(1)})" title="${escapeHtml(p.annotation.label)}: -${fmt(p.annotation.amount)}">
-      <rect x="-12" y="-7" width="24" height="14" rx="2" class="bill-rect"/>
-      <rect x="-9.5" y="-4.7" width="19" height="9.4" rx="1" class="bill-inner-border"/>
-      <circle cx="0" cy="0" r="4.3" class="bill-medallion"/>
-      <text x="0" y="1.6" text-anchor="middle" class="bill-d-letter">D</text>
-      <text x="-7.6" y="-2.6" text-anchor="middle" class="bill-corner-mark">$</text>
-      <text x="7.6" y="3.9" text-anchor="middle" class="bill-corner-mark">$</text>
+  const markers = points.filter((p) => p.annotation).map((p, mi) => `
+    <g class="urv-outflow-marker" transform="translate(${p.x.toFixed(1)},${(p.y + 15).toFixed(1)})" title="${escapeHtml(p.annotation.label)}: -${fmt(p.annotation.amount)}">
+      ${billInnerMarkup(`${chartId}-${mi}`)}
     </g>`).join("");
 
   // $1M gridlines on the left, month markers along the bottom — opt-in only.
@@ -430,9 +435,8 @@ function urvSparklineSVG(values, weeksMeta, chartId, opts = {}) {
     const firstLine = Math.ceil(lo / STEP) * STEP;
     for (let v = firstLine; v <= hi; v += STEP) {
       const y = plotBottom - ((v - lo) / range) * (plotBottom - padY);
-      gridLines.push(`
-        <line x1="${padX}" y1="${y.toFixed(1)}" x2="${W - (opts.padX ?? 8)}" y2="${y.toFixed(1)}" class="urv-axis-gridline"/>
-        <text x="${(padX - 8).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="urv-axis-label">$${Math.round(v / 1000000)}M</text>`);
+      const label = v === 0 ? "" : `<text x="${(padX - 8).toFixed(1)}" y="${(y + 3.5).toFixed(1)}" text-anchor="end" class="urv-axis-label">$${Math.round(v / 1000000)}M</text>`;
+      gridLines.push(`<line x1="${padX}" y1="${y.toFixed(1)}" x2="${W - (opts.padX ?? 8)}" y2="${y.toFixed(1)}" class="urv-axis-gridline"/>${label}`);
     }
     const monthLabels = points.filter((p, i) => {
       const wk = weeksMeta[i];
@@ -759,17 +763,38 @@ function openReceivablesScheduledModal(weeklyScheduled, weeksMeta) {
   });
 }
 
+// Shared dollar-bill design (gradient fill, double-ring medallion, bold
+// outlined D) used by both the chart markers and the standalone icon so
+// they're visually identical wherever distributions show up. Centered on
+// (0,0) in a 25 x 14.4 box — idSuffix must be unique per instance on the
+// page since SVG gradient ids are global.
+function billInnerMarkup(idSuffix) {
+  const gradId = `billGrad-${idSuffix}`;
+  return `
+    <defs>
+      <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#4aa578"/>
+        <stop offset="50%" stop-color="#2f7a54"/>
+        <stop offset="100%" stop-color="#1c4a33"/>
+      </linearGradient>
+    </defs>
+    <rect x="-12.5" y="-7.2" width="25" height="14.4" rx="2.2" fill="url(#${gradId})" class="bill-rect"/>
+    <rect x="-9.9" y="-4.9" width="19.8" height="9.8" rx="1.2" class="bill-inner-border"/>
+    <circle cx="0" cy="0" r="5" class="bill-medallion-ring"/>
+    <circle cx="0" cy="0" r="4.4" class="bill-medallion"/>
+    <text x="0" y="2.1" text-anchor="middle" class="bill-d-letter">D</text>
+    <text x="-8.2" y="-3.0" text-anchor="middle" class="bill-corner-mark">$</text>
+    <text x="8.2" y="4.3" text-anchor="middle" class="bill-corner-mark">$</text>`;
+}
+
+let billIconInstanceCount = 0;
 // Standalone dollar-bill-with-D icon — same design as the distribution
 // markers on the Combined Cash Position chart, so the two visually read as
 // "this is the same thing" wherever distributions show up.
 function billIconSVG(size = 20) {
-  return `<svg viewBox="0 0 24 14" width="${size}" height="${size * (14 / 24)}" class="bill-icon-standalone">
-    <rect x="0.5" y="0.5" width="23" height="13" rx="2" class="bill-rect"/>
-    <rect x="3" y="2.8" width="18" height="8.4" rx="1" class="bill-inner-border"/>
-    <circle cx="12" cy="7" r="4.3" class="bill-medallion"/>
-    <text x="12" y="8.6" text-anchor="middle" class="bill-d-letter">D</text>
-    <text x="4.4" y="5.4" text-anchor="middle" class="bill-corner-mark">$</text>
-    <text x="19.6" y="10.6" text-anchor="middle" class="bill-corner-mark">$</text>
+  billIconInstanceCount++;
+  return `<svg viewBox="0 0 25 14.4" width="${size}" height="${size * (14.4 / 25)}" class="bill-icon-standalone">
+    <g transform="translate(12.5,7.2)">${billInnerMarkup(`standalone-${billIconInstanceCount}`)}</g>
   </svg>`;
 }
 
@@ -790,6 +815,51 @@ function moneyBagSVG(pct, idSuffix) {
     <path d="${tiePath}" class="bag-tie"/>
     <text x="50" y="72" text-anchor="middle" class="bag-dollar">$</text>
   </svg>`;
+}
+
+function wireCombinedReadoutHover(host, chartId, points, weeksMeta, W, readoutId) {
+  const wrap = host.querySelector(`.urv-chart-wrap[data-chart="${chartId}"]`);
+  const readout = document.getElementById(readoutId);
+  if (!wrap || !readout) return;
+  const svg = wrap.querySelector(".urv-sparkline");
+  const hitbox = wrap.querySelector(".urv-chart-hitbox");
+  const vline = wrap.querySelector(".urv-chart-vline");
+  const weekDateEl = readout.querySelector(".dr-week-date");
+  const balanceEl = readout.querySelector(".dr-balance-value");
+  const distRow = readout.querySelector(".dr-dist-row");
+  const distAmtEl = readout.querySelector(".dr-dist-amount");
+
+  const show = (p) => {
+    const wk = weeksMeta[p.i];
+    weekDateEl.textContent = wk ? fmtDate(wk.end) : "—";
+    balanceEl.textContent = fmtMoney(p.v);
+    if (p.annotation) {
+      distRow.classList.add("active");
+      distAmtEl.textContent = `(${fmtMoney(p.annotation.amount)})`;
+    } else {
+      distRow.classList.remove("active");
+      distAmtEl.textContent = "None this week";
+    }
+  };
+  if (points.length) show(points[points.length - 1]); // default: latest week
+
+  const showNearest = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const svgX = ((clientX - rect.left) / rect.width) * W;
+    let nearest = points[0], minDist = Infinity;
+    for (const p of points) { const d = Math.abs(p.x - svgX); if (d < minDist) { minDist = d; nearest = p; } }
+    svg.querySelectorAll(".urv-chart-dot").forEach((d) => d.classList.toggle("active", Number(d.dataset.idx) === nearest.i));
+    vline.setAttribute("x1", nearest.x); vline.setAttribute("x2", nearest.x);
+    vline.style.display = "block";
+    show(nearest);
+  };
+  const hide = () => {
+    svg.querySelectorAll(".urv-chart-dot").forEach((d) => d.classList.remove("active"));
+    vline.style.display = "none";
+    if (points.length) show(points[points.length - 1]);
+  };
+  hitbox.addEventListener("mousemove", (e) => showNearest(e.clientX));
+  hitbox.addEventListener("mouseleave", hide);
 }
 
 function wireUrvChartHover(host, chartId, points, W, opts = {}) {
@@ -892,6 +962,12 @@ function renderCfKpiCards(containerId, chartPrefix, weeksMeta, weekly, totals, a
   `;
 }
 
+function payRunCadenceLabel(weeksMeta) {
+  if (!weeksMeta.length) return "Pay Runs: —";
+  const weekday = parseISO(weeksMeta[0].payRun).toLocaleDateString("en-US", { weekday: "long" });
+  return `Pay Runs: Weekly on ${weekday}s`;
+}
+
 function sliceSimpleTotals(weeks) {
   return {
     opening: weeks[0]?.opening ?? 0,
@@ -922,7 +998,7 @@ function renderSimpleAccountForecast(store, period, accountId) {
   document.getElementById("forecast-eyebrow").textContent = `${cfViewWeeks}-Week View · Starts ${fmtDate(period.startDate)}`;
   document.getElementById("forecast-meta").textContent = accountId === "eb-savings"
     ? "No activity except the monthly transfer in from Basin Checking."
-    : `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
+    : payRunCadenceLabel(weeksMeta);
 
   const weeksMetaFull = periodWeeks(period).slice(0, calc.weeks.length);
   renderCfKpiCards("forecast-stats", "simple", weeksMeta, {
@@ -1080,26 +1156,38 @@ export function renderHome(store) {
     const distributionsTotal = sum(distributionAnnotations.map((a) => a.amount));
 
     const chart = urvSparklineSVG(combinedClosing, weeksMetaForChart, "home-combined", {
-      W: 900, H: 150, padX: 14, padY: 14, fromZero: false, compact: true, annotations: distributionAnnotations, showAxes: true,
+      W: 900, H: 150, padX: 14, padY: 14, compact: true, annotations: distributionAnnotations, showAxes: true, axisFloor: 5000000,
     });
 
+    const readoutId = "home-combined-readout";
     combinedHost.innerHTML = `
       <div class="panel home-combined-card">
         <div class="home-combined-head">
           <div>
             <div class="home-combined-label">Combined Cash Position</div>
-            <div class="home-combined-sub">Basin Checking + Basin Savings + P&amp;C Checking + P&amp;C Savings — excludes EB Savings${distributionAnnotations.length ? ` · <span class="outflow-legend"><span class="outflow-legend-dot"></span>Distributions (outflow)</span>` : ""}</div>
+            <div class="home-combined-sub">Basin Checking + Basin Savings + P&amp;C Checking + P&amp;C Savings — excludes EB Savings</div>
           </div>
           <div class="home-combined-figures">
             <div><span class="label">Opening</span><span class="value">${fmtMoney(combinedOpening)}</span></div>
-            <div><span class="label">Net Change</span><span class="value ${netChange >= 0 ? "green" : "red"}">${fmtMoney(netChange, { signed: true })}</span></div>
+            <div><span class="label">Net Change</span><span class="value net-score ${netChange >= 0 ? "score-pos" : "score-neg"}">${netChange >= 0 ? "▲" : "▼"} ${fmtMoney(Math.abs(netChange))}</span></div>
             <div><span class="label">Closing</span><span class="value brass">${fmtMoney(closingNow)}</span></div>
-            <div><span class="label">Distributions</span><span class="value amber">${fmtMoney(distributionsTotal)}</span></div>
+            <div><span class="label">Distributions</span><span class="value dist-badge">${billIconSVG(15)}${fmtMoney(distributionsTotal)}</span></div>
+          </div>
+        </div>
+        <div class="digital-readout" id="${readoutId}">
+          <div class="dr-scanline"></div>
+          <div class="dr-corner dr-corner-tl"></div><div class="dr-corner dr-corner-tr"></div>
+          <div class="dr-corner dr-corner-bl"></div><div class="dr-corner dr-corner-br"></div>
+          <div class="dr-week-row"><span class="dr-blip"></span>WEEK ENDING <span class="dr-week-date">—</span></div>
+          <div class="dr-balance-label">CLOSING CASH BALANCE</div>
+          <div class="dr-balance-value">—</div>
+          <div class="dr-dist-row">
+            <span class="dr-dist-icon">${billIconSVG(13)}</span>DISTRIBUTION <span class="dr-dist-amount">—</span>
           </div>
         </div>
         ${chart.html}
       </div>`;
-    wireUrvChartHover(combinedHost, "home-combined", chart.points, chart.W, { compact: true });
+    wireCombinedReadoutHover(combinedHost, "home-combined", chart.points, weeksMetaForChart, chart.W, readoutId);
   }
 
   const cardCharts = []; // wired up after the whole grid's innerHTML is set
@@ -1110,7 +1198,10 @@ export function renderHome(store) {
     const closingDate = calc.weeks[calc.weeks.length - 1]?.week?.end;
     const chartId = `home-acct-${acct.id}`;
     const weeklyClosingForCard = calc.weeks.map((w) => w.closing);
-    const chart = urvSparklineSVG(weeklyClosingForCard, weeksMetaForChart, chartId, { W: 280, H: 50, padX: 2, padY: 6, fromZero: false, compact: true });
+    const cardDistAnnotations = calc.weeks
+      .map((w, i) => ({ wi: i, amount: distributionForWeek(acct.id, w), label: "Distribution" }))
+      .filter((a) => a.amount);
+    const chart = urvSparklineSVG(weeklyClosingForCard, weeksMetaForChart, chartId, { W: 280, H: 50, padX: 2, padY: 6, fromZero: false, compact: true, annotations: cardDistAnnotations });
 
     const fullWeeks = calcFullFor(acct.id);
     cardCharts.push({
@@ -1270,7 +1361,7 @@ export function renderForecast(store) {
 
   document.getElementById("forecast-title").textContent = period.label;
   document.getElementById("forecast-eyebrow").textContent = `${cfViewWeeks}-Week View · Starts ${fmtDate(period.startDate)}`;
-  document.getElementById("forecast-meta").textContent = `Pay runs: ${weeksMeta.map((w) => fmtDate(w.payRun)).join(", ")}`;
+  document.getElementById("forecast-meta").textContent = payRunCadenceLabel(weeksMeta);
 
   renderCfKpiCards("forecast-stats", "main", weeksMeta, {
     inflow: weeks.map((w) => w.totalInflows),
@@ -3360,7 +3451,7 @@ export function renderSettings(store) {
     return `<div class="period-row ${active ? "active" : ""}" data-id="${p.id}">
       <div>
         <div class="pname">${escapeHtml(p.label)} ${active ? '<span class="tag-active">Active — all users see this</span>' : ""}</div>
-        <div class="pmeta">Starts ${fmtDate(p.startDate)} · Pay runs: ${weeks.map((w) => fmtDate(w.payRun)).join(", ")}</div>
+        <div class="pmeta">Starts ${fmtDate(p.startDate)} · Pay runs weekly on ${weeks.length ? parseISO(weeks[0].payRun).toLocaleDateString("en-US", { weekday: "long" }) + "s" : "—"}</div>
       </div>
       <div style="display:flex; gap:8px;">
         ${active ? "" : `<button class="btn-ghost set-active">Set Active for All</button>`}
