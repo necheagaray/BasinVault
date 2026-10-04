@@ -615,10 +615,18 @@ table.cf-grid thead .wk-range{ display:block; font-size:9.5px; color:var(--text-
 table.cf-grid tbody td{ text-align:right; font-family:var(--font-mono); font-size:13.5px; color:var(--text-hi); position:relative; }
 table.cf-grid tbody td:first-child{
   text-align:left; font-family:var(--font-body); color:var(--text-hi); font-size:13.5px; font-weight:500;
-  position:sticky; left:0; z-index:5; background:var(--bg-panel);
-  box-shadow:2px 0 8px -2px rgba(0,0,0,0.5);
+  position:sticky; left:0; z-index:5;
+  /* !important guards against row-type rules (inflow-row, fixed-row, net, etc.)
+     that set a near-transparent background on every td in that row, including
+     this one — without it, scrolled-in values bleed visually through the
+     frozen column since those backgrounds are only ~3-5% opaque. */
+  background:var(--bg-panel) !important;
+  border-right:1px solid var(--line-bright);
+  box-shadow:3px 0 10px -2px rgba(0,0,0,0.6);
 }
 table.cf-grid thead th:first-child{ position:sticky; left:0; z-index:9; }
+table.cf-grid tbody tr.section-label td:first-child{ background:var(--bg-panel-alt) !important; }
+table.cf-grid tbody tr.opening td:first-child, table.cf-grid tbody tr.closing td:first-child{ background:var(--bg-raised) !important; }
 table.cf-grid tr.section-label td{
   background:var(--bg-panel-alt); font-size:10px; text-transform:uppercase; letter-spacing:0.12em;
   color:var(--brass); font-weight:700; padding-top:9px; padding-bottom:9px;
