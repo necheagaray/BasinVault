@@ -1041,18 +1041,18 @@ function renderSimpleAccountForecast(store, period, accountId) {
   table.innerHTML = `
     <thead><tr><th>Line Item</th>${weekHeaderCells(weeksMeta)}<th>Total</th></tr></thead>
     <tbody>
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Opening Balance</td></tr>
+      <tr class="section-label"><td colspan="${weeks.length + 2}"><span class="sec-title">Opening Balance</span></td></tr>
       <tr class="opening"><td><span class="row-label-text">Opening Cash</span></td>${weeks.map((r, wi) => wi === 0 ? `<td class="ed opening-open" data-wi="0">${fmtMoney(r.opening)}</td>` : `<td>${fmtMoney(r.opening)}</td>`).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
 
-      <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}">Cash Inflow</td></tr>
+      <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}"><span class="sec-title">Cash Inflow</span></td></tr>
       ${inflowKeys.map((rk) => rowHtml(rk, "inflows", "inflow-row")).join("")}
 
-      <tr class="section-label sec-outflow-fixed"><td colspan="${weeks.length + 2}">Cash Outflow</td></tr>
+      <tr class="section-label sec-outflow-fixed"><td colspan="${weeks.length + 2}"><span class="sec-title">Cash Outflow</span></td></tr>
       ${outflowKeys.map((rk) => rowHtml(rk, "outflows", "fixed-row")).join("")}
 
       <tr class="net"><td><span class="row-label-text">Net Cashflow</span></td>${weeks.map((r) => `<td class="${r.netCashflow >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(r.netCashflow)}</td>`).join("")}<td class="${calc.totals.netCashflow >= 0 ? "value-pos" : "value-neg"}">${fmtMoney(calc.totals.netCashflow)}</td></tr>
 
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
+      <tr class="section-label"><td colspan="${weeks.length + 2}"><span class="sec-title">Closing Balance</span></td></tr>
       <tr class="closing"><td><span class="row-label-text">Closing Cash</span></td>${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
     </tbody>
   `;
@@ -1387,24 +1387,24 @@ export function renderForecast(store) {
   table.innerHTML = `
     <thead><tr><th>Line Item</th>${weekHeaderCells(weeksMeta)}<th>Total</th></tr></thead>
     <tbody>
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Opening Balance</td></tr>
+      <tr class="section-label"><td colspan="${weeks.length + 2}"><span class="sec-title">Opening Balance</span></td></tr>
       <tr class="opening" data-row="opening">${labelCell(period, "Opening Cash", "opening", null, false)}${weeks.map((r, wi) => wi === 0
         ? `<td class="ed opening-open" data-wi="0">${fmtMoney(r.opening)}</td>`
         : `<td>${fmtMoney(r.opening)}</td>`
       ).join("")}<td>${fmtMoney(calc.totals.opening)}</td></tr>
 
-      <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}">Cash Inflow</td></tr>
+      <tr class="section-label sec-inflow"><td colspan="${weeks.length + 2}"><span class="sec-title">Cash Inflow</span></td></tr>
       <tr class="inflow-row rc-row" data-row="receivablesCollected">${labelCell(period, "Receivables Collected", "receivablesCollected", null, false)}${weeks.map((r, wi) => `<td class="rc-cell" data-wi="${wi}" title="Computed from receivables' CF dates — not manually editable">${fmtMoney(r.receivablesCollected)}<div class="rc-bar" title="${rcBreakdowns[wi].pct}% collected"><div class="rc-bar-fill" style="width:${rcBreakdowns[wi].pct}%"></div></div></td>`).join("")}<td class="rc-cell rc-total-cell" title="Computed from receivables' CF dates — not manually editable">${fmtMoney(calc.totals.receivablesCollected)}<div class="rc-bar" title="${rcTotalBreakdown.pct}% collected"><div class="rc-bar-fill" style="width:${rcTotalBreakdown.pct}%"></div></div></td></tr>
       <tr class="inflow-row" data-row="otherInflows">${labelCell(period, "Other Inflows", "otherInflows", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.otherInflows)}</td>`).join("")}<td>${fmtMoney(calc.totals.otherInflows)}</td></tr>
       <tr class="inflow-row ic-row" data-row="interCompanyIn">${labelCell(period, "⇄ Inter Company Transfer", "interCompanyIn", null, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from Transfers — not manually editable">${fmtMoney(r.interCompanyIn)}${icAccountTag(r.interCompanyItems.inflow)}</td>`).join("")}<td title="Computed from Transfers — not manually editable">${fmtMoney(calc.totals.interCompanyIn)}</td></tr>
       <tr class="inflow-total" data-row="totalInflows">${labelCell(period, "Total Inflows", "totalInflows", null, false)}${weeks.map((r) => `<td class="value-pos">${fmtMoney(r.totalInflows)}</td>`).join("")}<td class="value-pos">${fmtMoney(calc.totals.totalInflows)}</td></tr>
 
-      <tr class="section-label sec-outflow-manual"><td colspan="${weeks.length + 2}">Cash Outflow — Manual</td></tr>
+      <tr class="section-label sec-outflow-manual"><td colspan="${weeks.length + 2}"><span class="sec-title">Cash Outflow — Manual</span></td></tr>
       ${state.manualOutflowCategories.filter((c) => c !== "Payroll").map((cat) => `
         <tr class="outflow-row" data-row="manual" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "manual", cat, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.manualOutflows[cat])}</td>`).join("")}<td>${fmtMoney(calc.totals.manualOutflows[cat])}</td></tr>
       `).join("")}
 
-      <tr class="section-label sec-outflow-fixed"><td colspan="${weeks.length + 2}">Cash Outflow — Fixed / Scheduled</td></tr>
+      <tr class="section-label sec-outflow-fixed"><td colspan="${weeks.length + 2}"><span class="sec-title">Cash Outflow — Fixed / Scheduled</span></td></tr>
       ${calc.fixedCategories.map((cat) => `
         <tr class="fixed-row" data-row="fixed" data-cat="${escapeHtml(cat)}">${labelCell(period, cat, "fixed", cat, false)}${weeks.map((r, wi) => `<td data-wi="${wi}" title="Computed from Fixed Payments — not manually editable">${fmtMoney(r.fixedRows[cat])}</td>`).join("")}<td title="Computed from Fixed Payments — not manually editable">${fmtMoney(calc.totals.fixedRows[cat])}</td></tr>
       `).join("")}
@@ -1418,7 +1418,7 @@ export function renderForecast(store) {
 
       <tr class="loc-row" data-row="locDraw">${labelCell(period, "⟲ LOC Draw / (Repayment)", "locDraw", null, true)}${weeks.map((r, wi) => `<td class="ed" data-wi="${wi}">${fmtMoney(r.locDraw)}</td>`).join("")}<td>${fmtMoney(calc.totals.locDraw)}</td></tr>
 
-      <tr class="section-label"><td colspan="${weeks.length + 2}">Closing Balance</td></tr>
+      <tr class="section-label"><td colspan="${weeks.length + 2}"><span class="sec-title">Closing Balance</span></td></tr>
       <tr class="closing" data-row="closing">${labelCell(period, "Closing Cash", "closing", null, false)}${weeks.map((r) => `<td>${fmtMoney(r.closing)}</td>`).join("")}<td>${fmtMoney(calc.totals.closing)}</td></tr>
 
       <tr class="locbalance-row" data-row="locBalanceOpening"><td><span class="row-label-text">▣ LOC Balance</span><span class="loc-open-badge" title="Opening LOC balance entered when this forecast was created">Opening ${fmtMoney(period.locOpeningBalance || 0)}</span></td>${weeks.map((r, wi) => wi === 0
@@ -3057,7 +3057,15 @@ export function syncStickyOffsets() {
     const h = Math.ceil(frozen.getBoundingClientRect().height);
     table.style.setProperty("--sticky-top", `${h}px`);
   };
-  applyOffset("forecast-frozen-head", "#cf-grid");
+  // The CF grid scrolls inside its own wrapper (so its header and first column can
+  // both stick), which means the wrapper needs a height that fits the screen
+  // rather than a page-level sticky offset.
+  const cfWrap = document.querySelector(".cf-table-wrap");
+  if (cfWrap && cfWrap.offsetParent !== null) {
+    const topAtScrollZero = cfWrap.getBoundingClientRect().top + window.scrollY;
+    const fitted = Math.max(360, Math.floor(window.innerHeight - topAtScrollZero - 24));
+    cfWrap.style.setProperty("--cf-wrap-max-h", `${fitted}px`);
+  }
   applyOffset("ar-frozen-head", "#ar-table");
   applyOffset("ub-frozen-head", "#ub-table");
 

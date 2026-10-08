@@ -589,7 +589,10 @@ table.cm-modal-table th{ position:sticky; top:0; background:var(--bg-panel-alt);
 
 /* ===================== CF FORECAST GRID ===================== */
 .cf-table-wrap{
-  position:relative; overflow-x:auto;
+  /* Single scroll area for the grid: the header sticks to its top edge and the
+     first column to its left edge. Height is fitted to the screen by
+     syncStickyOffsets (70vh is only the fallback before that runs). */
+  position:relative; overflow:auto; max-height:var(--cf-wrap-max-h, 70vh);
   border-radius:var(--radius-lg); border:1px solid var(--line-bright);
   box-shadow:0 1px 0 rgba(255,255,255,0.03) inset, 0 20px 44px -26px rgba(0,0,0,0.8), 0 0 0 1px rgba(200,163,90,0.08);
 }
@@ -597,7 +600,7 @@ table.cf-grid{ width:100%; border-collapse:collapse; min-width:1150px; }
 table.cf-grid th, table.cf-grid td{ padding:11px 16px; border-bottom:1px solid var(--line); white-space:nowrap; }
 table.cf-grid thead th{
   background:linear-gradient(180deg, var(--bg-raised), var(--bg-panel-alt)); text-align:right; font-family:var(--font-mono); font-size:11.5px;
-  text-transform:uppercase; letter-spacing:0.09em; color:var(--brass-bright); font-weight:700; position:sticky; top:var(--sticky-top, 0px);
+  text-transform:uppercase; letter-spacing:0.09em; color:var(--brass-bright); font-weight:700; position:sticky; top:0;
   border-bottom:2px solid var(--brass-dim); z-index:8; padding:13px 16px;
   box-shadow:0 8px 16px -6px rgba(0,0,0,0.6);
   text-shadow:0 0 12px rgba(230,195,126,0.2);
@@ -625,23 +628,26 @@ table.cf-grid tbody td:first-child{
   box-shadow:3px 0 10px -2px rgba(0,0,0,0.6);
 }
 table.cf-grid thead th:first-child{ position:sticky; left:0; z-index:9; }
-table.cf-grid tbody tr.section-label td:first-child{ background:var(--bg-panel-alt) !important; }
+table.cf-grid tbody tr.section-label td:first-child{
+  background:var(--bg-panel-alt) !important; position:relative; z-index:auto; box-shadow:none; border-right:none;
+}
+table.cf-grid tr.section-label .sec-title{ display:inline-block; position:sticky; left:16px; }
 table.cf-grid tbody tr.opening td:first-child, table.cf-grid tbody tr.closing td:first-child{ background:var(--bg-raised) !important; }
 table.cf-grid tr.section-label td{
   background:var(--bg-panel-alt); font-size:10px; text-transform:uppercase; letter-spacing:0.12em;
   color:var(--brass); font-weight:700; padding-top:9px; padding-bottom:9px;
   border-top:1px solid var(--line); border-bottom:1px solid var(--line);
 }
-table.cf-grid tr.section-label td:first-child::before{
+table.cf-grid tr.section-label .sec-title::before{
   content:''; display:inline-block; width:7px; height:7px; border-radius:2px; margin-right:9px;
   background:var(--brass); box-shadow:0 0 8px var(--brass); vertical-align:1px;
 }
 table.cf-grid tr.section-label.sec-inflow td{ color:var(--green); }
-table.cf-grid tr.section-label.sec-inflow td:first-child::before{ background:var(--green); box-shadow:0 0 8px var(--green); }
+table.cf-grid tr.section-label.sec-inflow .sec-title::before{ background:var(--green); box-shadow:0 0 8px var(--green); }
 table.cf-grid tr.section-label.sec-outflow-manual td{ color:var(--amber); }
-table.cf-grid tr.section-label.sec-outflow-manual td:first-child::before{ background:var(--amber); box-shadow:0 0 8px var(--amber); }
+table.cf-grid tr.section-label.sec-outflow-manual .sec-title::before{ background:var(--amber); box-shadow:0 0 8px var(--amber); }
 table.cf-grid tr.section-label.sec-outflow-fixed td{ color:var(--violet); }
-table.cf-grid tr.section-label.sec-outflow-fixed td:first-child::before{ background:var(--violet); box-shadow:0 0 8px var(--violet); }
+table.cf-grid tr.section-label.sec-outflow-fixed .sec-title::before{ background:var(--violet); box-shadow:0 0 8px var(--violet); }
 
 table.cf-grid tr.opening td{ background:var(--bg-raised); font-weight:700; }
 table.cf-grid tr.closing td{ background:var(--bg-raised); font-weight:700; border-top:1px solid var(--line-bright); }
