@@ -17,7 +17,7 @@ export default [
         setInterval: "readonly", clearInterval: "readonly", navigator: "readonly", FileReader: "readonly",
         Blob: "readonly", URL: "readonly", DOMParser: "readonly", XLSX: "readonly",
         requestAnimationFrame: "readonly", confirm: "readonly", prompt: "readonly", alert: "readonly",
-        ClipboardItem: "readonly", location: "readonly", history: "readonly", crypto: "readonly",
+        ClipboardItem: "readonly", ResizeObserver: "readonly", location: "readonly", history: "readonly", crypto: "readonly",
       },
     },
     rules: { "no-undef": "error" },

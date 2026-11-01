@@ -525,7 +525,6 @@ button.chart-expand-btn:hover{ background:rgba(230,195,126,0.07); }
   opacity:0; transition:opacity .15s; pointer-events:none; background:var(--bg-panel); padding:1px 4px; border-radius:3px;
 }
 button.chart-expand-btn:hover .chart-expand-hint{ opacity:1; color:var(--brass-bright); }
-.account-card-chart.chart-expand-btn{ flex:1; display:flex; align-items:center; margin-bottom:10px; min-height:40px; }
 
 /* detail modal */
 .modal:has(.cm-modal-section){ width:880px; max-width:94vw; }
@@ -1270,7 +1269,6 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   text-shadow:0 0 10px rgba(125,232,174,0.4);
 }
 .dist-badge .bill-icon-standalone{ filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
-.home-combined-card .urv-sparkline{ height:150px; position:relative; z-index:1; }
 .urv-axis-gridline{ stroke:rgba(255,255,255,0.12); stroke-width:1; shape-rendering:crispEdges; }
 .urv-axis-label{
   font-family:var(--font-mono); font-size:10.5px; font-weight:600; fill:#c3cad9;
@@ -1368,7 +1366,6 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
   font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-dim);
   display:flex; flex-direction:column; gap:1px; white-space:nowrap;
 }
-.as-of-date{ text-transform:none; letter-spacing:0; opacity:0.65; font-style:italic; font-size:9px; }
 .acf-item .value{
   font-family:var(--font-mono); font-size:16px; font-weight:700; color:var(--text-hi); text-shadow:0 0 14px rgba(255,255,255,0.08);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
@@ -1377,10 +1374,6 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .acf-item .value.red{ color:var(--red); text-shadow:0 0 16px rgba(239,111,92,0.3); }
 .acf-item .value.brass{ color:var(--brass-bright); text-shadow:0 0 18px rgba(230,195,126,0.4); }
 
-.account-card-chart{ flex:1; display:flex; align-items:center; margin-bottom:18px; min-height:40px; overflow:visible; }
-.account-card-chart .urv-sparkline{ overflow:visible; }
-.account-card-chart .urv-sparkline{ height:50px; width:100%; display:block; }
-.account-card-chart .urv-chart-tooltip{ font-size:10px; padding:3px 7px; }
 
 .account-card-actions{
   display:flex; gap:8px; border-top:1px solid var(--line); padding-top:12px; margin-top:auto;
@@ -1414,7 +1407,6 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 /* Basin Checking keeps its "main" prominence but is no longer full-width */
 .layout-basin-checking .account-card-name{ font-size:23px; }
 .layout-basin-checking .acf-item .value{ font-size:19px; }
-.layout-basin-checking .account-card-chart .urv-sparkline{ height:60px; }
 
 /* EB Savings — narrow column, figures wrap instead of cramming 3 across */
 .layout-eb-savings{ padding:16px 18px; }
@@ -1423,7 +1415,6 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .layout-eb-savings .acf-item{ flex:1 1 40%; }
 .layout-eb-savings .acf-item .label{ font-size:8.5px; }
 .layout-eb-savings .acf-item .value{ font-size:12.5px; }
-.layout-eb-savings .account-card-chart .urv-sparkline{ height:40px; }
 .layout-eb-savings .account-card-cta{ font-size:10px; padding-top:8px; }
 
 /* ===================== VAULT INTERIOR — applied to every tab for a cohesive feel ===================== */
@@ -1628,3 +1619,69 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 .balance-eb-week:last-child .balance-eb-week-value{ color:var(--violet); font-size:15px; text-shadow:0 0 12px rgba(195,174,252,0.5); }
 .balance-eb-week-label{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); }
 .balance-eb-week-value{ font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--text-hi); }
+
+
+/* ================= Home: Combined Cash Position chart (drawn at true pixel size) ================= */
+.cc-chart-host{ position:relative; z-index:1; min-height:270px; }
+.cc-chart .cc-chart-svg{ display:block; width:auto; max-width:none; height:auto; overflow:visible; }
+.cc-grid{ stroke:rgba(150,170,205,0.15); stroke-width:1; shape-rendering:crispEdges; }
+.cc-grid-base{ stroke:rgba(205,218,240,0.42); }
+.cc-vguide{ stroke:rgba(150,170,205,0.08); stroke-width:1; stroke-dasharray:2 5; shape-rendering:crispEdges; }
+.cc-tick{ stroke:rgba(205,218,240,0.5); stroke-width:1; shape-rendering:crispEdges; }
+.cc-axis-y, .cc-axis-x, .cc-axis-cap{ font-family:var(--font-mono); text-rendering:geometricPrecision; }
+.cc-axis-y{ font-size:12px; font-weight:600; fill:#c4cee3; text-anchor:end; }
+.cc-axis-x{ font-size:11.5px; font-weight:600; fill:#b6c1d8; text-anchor:middle; letter-spacing:0.02em; }
+.cc-axis-cap{ font-size:8.5px; font-weight:600; fill:rgba(182,193,216,0.55); text-anchor:end; letter-spacing:0.14em; }
+.cc-line{ fill:none; stroke-width:2.6; stroke-linejoin:round; stroke-linecap:round; }
+.cc-line-glow{ fill:none; stroke-width:7; stroke-linejoin:round; stroke-linecap:round; opacity:0.38; }
+.cc-chart .urv-chart-dot{ r:4.5; fill:#0b1118; stroke:#f0d48e; stroke-width:2; transition:r .12s, fill .12s; }
+.cc-chart .urv-chart-dot.active{ r:7; fill:#f0d48e; stroke:#fff3cf; filter:drop-shadow(0 0 6px rgba(240,212,142,0.95)); }
+.cc-chart .urv-chart-vline{ stroke:var(--cyan); stroke-width:1; stroke-dasharray:3 3; opacity:0.85; }
+.cc-today{ stroke:var(--cyan); stroke-width:1; stroke-dasharray:4 4; opacity:0.55; shape-rendering:crispEdges; }
+.cc-today-tag rect{ fill:rgba(122,217,236,0.14); stroke:rgba(122,217,236,0.65); stroke-width:1; }
+.cc-today-tag text{ fill:#c6f3fd; font-family:var(--font-mono); font-size:9px; font-weight:700; letter-spacing:0.14em; text-anchor:middle; }
+.cc-bill-stem{ stroke:rgba(125,232,174,0.55); stroke-width:1; stroke-dasharray:2 2; }
+
+/* ================= Home: account panels ================= */
+.date-chip{
+  display:inline-flex; align-items:baseline; gap:6px; margin-top:7px; padding:3px 10px 3px 8px; align-self:flex-start;
+  border-radius:6px; font-family:var(--font-mono);
+  background:rgba(122,217,236,0.10); border:1px solid rgba(122,217,236,0.45); box-shadow:0 0 14px -4px rgba(122,217,236,0.6);
+}
+.date-chip i{ font-style:normal; font-size:9px; font-weight:700; letter-spacing:0.13em; text-transform:uppercase; color:rgba(122,217,236,0.8); }
+.date-chip b{ font-size:14px; font-weight:800; letter-spacing:0.02em; color:#dcf8ff; text-shadow:0 0 10px rgba(122,217,236,0.6); white-space:nowrap; }
+.date-chip-na{ opacity:0.45; box-shadow:none; }
+
+.acct-ladder{
+  display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr);
+  align-items:stretch; gap:6px; margin:6px 0 16px; flex:1;
+}
+.ladder-arrow{ align-self:center; color:var(--brass-dim); font-size:22px; line-height:1; opacity:0.8; }
+.ladder-tile{ display:flex; flex-direction:column; justify-content:center; min-width:0; padding:10px 12px 11px; border-radius:9px; border:1px solid var(--line-bright); background:rgba(255,255,255,0.025); }
+.lt-label{
+  display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0;
+  font-family:var(--font-mono); font-size:9.5px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-dim);
+}
+.lt-label-text{ min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lt-tag{
+  flex-shrink:0; padding:2px 6px; border-radius:4px; font-size:8px; letter-spacing:0.07em;
+  color:#1a1405; background:linear-gradient(135deg, #f0dfae, var(--brass-bright)); box-shadow:0 0 10px -2px rgba(230,195,126,0.55);
+}
+.lt-amount{
+  font-family:var(--font-mono); font-size:18px; font-weight:800; color:var(--text-hi); margin-top:8px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ladder-last{
+  border-color:rgba(122,217,236,0.5); background:linear-gradient(180deg, rgba(122,217,236,0.10), rgba(122,217,236,0.025));
+  box-shadow:0 0 18px -7px rgba(122,217,236,0.65);
+}
+.ladder-last .lt-label{ color:#9fe3f2; }
+.ladder-last .lt-amount{ color:#eafcff; text-shadow:0 0 12px rgba(122,217,236,0.45); }
+.ladder-ahead{ border-style:dashed; border-color:rgba(230,195,126,0.55); background:linear-gradient(180deg, rgba(230,195,126,0.07), rgba(230,195,126,0.015)); }
+.ladder-ahead .lt-label{ color:var(--brass-bright); }
+.ladder-ahead .lt-amount{ color:var(--brass-bright); text-shadow:0 0 12px rgba(230,195,126,0.35); }
+
+/* EB Savings is the narrow, tall column: same three tiles, stacked in one column that fills the height */
+.layout-eb-savings .date-chip i{ display:none; }
+.layout-eb-savings .acct-ladder{ grid-template-columns:1fr; grid-auto-rows:1fr; gap:8px; }
+.layout-eb-savings .ladder-arrow{ display:none; }

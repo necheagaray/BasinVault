@@ -648,6 +648,26 @@ export function interestForAccount(state, period, accountId) {
   return { perWeek, amount };
 }
 
+// Week-end balances for the Home account panels: the most recent week that has
+// ended, the one before it, and the week ahead. A week counts as ended once its
+// last day has passed (todayStr is later than the week's end date). The forecast's
+// opening cash is the balance at the end of the week *before* week 0, so it stands in
+// when the period has only just begun and no forecast week has ended yet.
+// `weeks` are computed forecast weeks ({ opening, closing, week:{start,end} }).
+export function weekEndLadder(weeks, todayStr) {
+  const none = { prior: null, last: null, ahead: null };
+  if (!weeks || !weeks.length) return none;
+  // endBalances[0] is the balance entering week 0; endBalances[k + 1] closes week k
+  const endBalances = [
+    { amount: weeks[0].opening, date: toISO(addDays(weeks[0].week.start, -1)) },
+    ...weeks.map((w) => ({ amount: w.closing, date: w.week.end })),
+  ];
+  const at = (weekIdx) => endBalances[weekIdx + 1] || null; // weekIdx -1 = opening
+  let lastWeekIdx = -1;
+  weeks.forEach((w, i) => { if (w.week.end < todayStr) lastWeekIdx = i; });
+  return { prior: at(lastWeekIdx - 1), last: at(lastWeekIdx), ahead: at(lastWeekIdx + 1) };
+}
+
 // Normalizes a (name, number) pair into a stable lookup key — trimmed,
 // lowercased, so minor formatting differences between imports don't break
 // the match.

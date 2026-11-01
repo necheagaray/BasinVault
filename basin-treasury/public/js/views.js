@@ -3,7 +3,7 @@ import {
   periodWeeks, computeForecast, weekIndexForDate, weekIndexForDateStrict, fixedOccurrencesInPeriod, scheduleLabel,
   FIXED_CATEGORY_ORDER, makePeriod, mergeAgingImport, createUnbilledLines, applyAutoScheduleToAll, applyAutoScheduleToGroup, readOv, payrollWeeksFor, k401WeeksFor, weekAmountFor,
   effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone, interestForAccount,
-  UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice, unbilledRevenueOccurrencesInPeriod, recordPwpMemory,
+  UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice, unbilledRevenueOccurrencesInPeriod, recordPwpMemory, weekEndLadder,
   ACCOUNTS, accountName, computeForecastForAccount, computeSimpleAccountForecast,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
@@ -817,6 +817,106 @@ function moneyBagSVG(pct, idSuffix) {
   </svg>`;
 }
 
+let combinedChartObserver = null; // redraws the Home chart at true pixel size when the panel is resized
+
+// Home "Combined Cash Position" chart. The shared sparkline draws in a fixed box and is
+// stretched to fit the panel, which smears every label and dot. This one is told the real
+// pixel width and draws 1:1, so axis text, ticks and markers stay razor sharp.
+function combinedCashChartSVG(values, weeksMeta, annotations, opts) {
+  const W = Math.max(520, Math.round(opts.W));
+  const H = opts.H || 270;
+  const m = { l: 66, r: 30, t: 40, b: 46 };
+  const plotW = W - m.l - m.r, plotH = H - m.t - m.b;
+  const n = values.length;
+  const baseY = m.t + plotH;
+
+  // Vertical scale: $0 (or lower, if a balance ever goes negative) up to at least the
+  // floor, a gridline every $1M — only widened when the data genuinely needs it.
+  let step = 1000000;
+  const dataMax = Math.max(0, ...values), dataMin = Math.min(0, ...values);
+  let hi = Math.max(opts.axisFloor || 0, Math.ceil(dataMax / step) * step, step);
+  let lo = Math.floor(dataMin / step) * step;
+  while ((hi - lo) / step > 8) step *= 2;
+  hi = Math.ceil(hi / step) * step; lo = Math.floor(lo / step) * step;
+  const yAt = (val) => m.t + plotH - ((val - lo) / (hi - lo)) * plotH;
+  const zeroY = yAt(0);
+  const slot = n ? plotW / n : plotW;
+  const xAt = (i) => m.l + (i + 0.5) * slot; // each point is a week-END balance, centred in its slot
+  const fmtAxis = (val) => (val === 0 ? "$0" : `${val < 0 ? "-" : ""}$${Math.abs(val) / 1000000}M`);
+
+  const annByWi = {};
+  for (const a of annotations || []) annByWi[a.wi] = a;
+  const pts = values.map((val, i) => ({
+    i, v: val, x: xAt(i), y: yAt(val),
+    label: weeksMeta[i] ? `Week of ${fmtDateShort(weeksMeta[i].start)}` : `Week ${i + 1}`,
+    annotation: annByWi[i] || null,
+  }));
+
+  // horizontal gridlines + dollar labels (snapped to half-pixels so 1px lines stay crisp)
+  let grid = "", yLabels = "";
+  for (let val = lo; val <= hi + 1; val += step) {
+    const y = Math.round(yAt(val)) + 0.5;
+    grid += `<line x1="${m.l}" x2="${W - m.r}" y1="${y}" y2="${y}" class="cc-grid${val === 0 ? " cc-grid-base" : ""}"/>`;
+    yLabels += `<text x="${m.l - 13}" y="${y + 4}" class="cc-axis-y">${fmtAxis(val)}</text>`;
+  }
+
+  // week-ending labels: every week while they fit, every other week once they'd crowd.
+  // Counting back from the last week keeps the final week-end always labelled.
+  const every = Math.max(1, Math.ceil(62 / slot));
+  let xAxis = `<text x="${m.l - 13}" y="${baseY + 24}" class="cc-axis-cap">WK END</text>`;
+  for (let i = 0; i < n; i++) {
+    if ((n - 1 - i) % every !== 0) continue;
+    const x = Math.round(pts[i].x) + 0.5;
+    xAxis += `<line x1="${x}" x2="${x}" y1="${m.t}" y2="${baseY}" class="cc-vguide"/>`
+      + `<line x1="${x}" x2="${x}" y1="${baseY}" y2="${baseY + 6}" class="cc-tick"/>`
+      + `<text x="${x}" y="${baseY + 24}" class="cc-axis-x">${weeksMeta[i] ? fmtDateShort(weeksMeta[i].end) : ""}</text>`;
+  }
+
+  const lineD = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+  const areaD = n ? `${lineD} L${pts[n - 1].x.toFixed(1)},${zeroY.toFixed(1)} L${pts[0].x.toFixed(1)},${zeroY.toFixed(1)} Z` : "";
+
+  // distribution bills sit just off the point (below it, or above if there's no room)
+  const bills = pts.filter((p) => p.annotation).map((p, mi) => {
+    const below = p.y + 34 <= baseY - 4;
+    const by = below ? p.y + 28 : p.y - 28;
+    const stem = below ? [p.y + 7, by - 10] : [by + 10, p.y - 7];
+    return `<line class="cc-bill-stem" x1="${p.x.toFixed(1)}" x2="${p.x.toFixed(1)}" y1="${stem[0].toFixed(1)}" y2="${stem[1].toFixed(1)}"/>`
+      + `<g class="urv-outflow-marker" transform="translate(${p.x.toFixed(1)},${by.toFixed(1)}) scale(1.3)">${billInnerMarkup(`cc-${mi}`)}</g>`;
+  }).join("");
+
+  // "today" marker, positioned on the same weekly time scale as the points
+  let today = "";
+  if (opts.todayISO && n) {
+    const days = (parseISO(opts.todayISO) - parseISO(weeksMeta[0].end)) / 86400000;
+    const tx = m.l + (0.5 + days / 7) * slot;
+    if (tx >= m.l && tx <= W - m.r) {
+      const tagX = Math.min(Math.max(tx, m.l + 24), W - m.r - 24);
+      today = `<line class="cc-today" x1="${tx.toFixed(1)}" x2="${tx.toFixed(1)}" y1="${m.t - 6}" y2="${baseY}"/>`
+        + `<g class="cc-today-tag" transform="translate(${tagX.toFixed(1)},${m.t - 20})"><rect x="-24" y="-8" width="48" height="16" rx="3"/><text x="0" y="3.5">TODAY</text></g>`;
+    }
+  }
+
+  const html = `<div class="urv-chart-wrap cc-chart" data-chart="home-combined">
+    <svg class="urv-sparkline cc-chart-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Combined cash position by week">
+      <defs>
+        <linearGradient id="ccg-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#e6c37e" stop-opacity="0.34"/><stop offset="100%" stop-color="#e6c37e" stop-opacity="0.02"/></linearGradient>
+        <linearGradient id="ccg-line" gradientUnits="userSpaceOnUse" x1="${m.l}" y1="0" x2="${W - m.r}" y2="0"><stop offset="0%" stop-color="#b8933f"/><stop offset="55%" stop-color="#f6e0a2"/><stop offset="100%" stop-color="#e6c37e"/></linearGradient>
+        <filter id="ccg-glow" filterUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}"><feGaussianBlur stdDeviation="4"/></filter>
+      </defs>
+      ${grid}${xAxis}
+      <path d="${areaD}" fill="url(#ccg-area)"/>
+      <path d="${lineD}" class="cc-line-glow" stroke="url(#ccg-line)" filter="url(#ccg-glow)"/>
+      <path d="${lineD}" class="cc-line" stroke="url(#ccg-line)"/>
+      ${today}${bills}
+      ${pts.map((p) => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" class="urv-chart-dot" data-idx="${p.i}"/>`).join("")}
+      ${yLabels}
+      <line class="urv-chart-vline" x1="0" y1="${m.t}" x2="0" y2="${baseY}"/>
+      <rect class="urv-chart-hitbox" x="0" y="0" width="${W}" height="${H}"/>
+    </svg>
+  </div>`;
+  return { html, points: pts, W, H };
+}
+
 function wireCombinedReadoutHover(host, chartId, points, weeksMeta, W, readoutId) {
   const wrap = host.querySelector(`.urv-chart-wrap[data-chart="${chartId}"]`);
   const readout = document.getElementById(readoutId);
@@ -1155,10 +1255,6 @@ export function renderHome(store) {
 
     const distributionsTotal = sum(distributionAnnotations.map((a) => a.amount));
 
-    const chart = urvSparklineSVG(combinedClosing, weeksMetaForChart, "home-combined", {
-      W: 900, H: 150, padX: 14, padY: 14, compact: true, annotations: distributionAnnotations, showAxes: true, axisFloor: 5000000,
-    });
-
     const readoutId = "home-combined-readout";
     combinedHost.innerHTML = `
       <div class="panel home-combined-card">
@@ -1185,27 +1281,51 @@ export function renderHome(store) {
             <span class="dr-dist-icon">${billIconSVG(13)}</span>DISTRIBUTION <span class="dr-dist-amount">—</span>
           </div>
         </div>
-        ${chart.html}
+        <div class="cc-chart-host" id="home-combined-plot"></div>
       </div>`;
-    wireCombinedReadoutHover(combinedHost, "home-combined", chart.points, weeksMetaForChart, chart.W, readoutId);
+
+    // Draw at the panel's real pixel width (sharp, never stretched) and redraw if it changes.
+    const plotHost = document.getElementById("home-combined-plot");
+    let drawnWidth = 0;
+    const drawCombinedChart = () => {
+      const w = Math.floor(plotHost.clientWidth) || 900;
+      if (w === drawnWidth) return;
+      drawnWidth = w;
+      const chart = combinedCashChartSVG(combinedClosing, weeksMetaForChart, distributionAnnotations, { W: w, H: 270, axisFloor: 5000000, todayISO: todayISO() });
+      plotHost.innerHTML = chart.html;
+      wireCombinedReadoutHover(combinedHost, "home-combined", chart.points, weeksMetaForChart, chart.W, readoutId);
+    };
+    drawCombinedChart();
+    if (combinedChartObserver) combinedChartObserver.disconnect();
+    if (typeof ResizeObserver !== "undefined") {
+      combinedChartObserver = new ResizeObserver(drawCombinedChart);
+      combinedChartObserver.observe(plotHost);
+    }
   }
 
-  const cardCharts = []; // wired up after the whole grid's innerHTML is set
+  const cardCharts = []; // detail-modal data per account, wired up after the grid's innerHTML is set
+  const today = todayISO();
+  // Vivid date chip used on the account panels (dates were tiny dim italics before)
+  const dateChip = (iso, prefix = "") => `<span class="date-chip">${prefix ? `<i>${prefix}</i>` : ""}<b>${iso ? fmtDateShort(iso) : "—"}</b></span>`;
+  const ladderTile = (cls, label, entry, tag = "") => `
+    <div class="ladder-tile ${cls}">
+      <div class="lt-label"><span class="lt-label-text">${label}</span>${tag ? `<span class="lt-tag">${tag}</span>` : ""}</div>
+      ${entry ? dateChip(entry.date) : `<span class="date-chip date-chip-na"><b>n/a</b></span>`}
+      <div class="lt-amount">${entry ? fmtMoney(entry.amount) : "—"}</div>
+    </div>`;
+
   const cardHtml = (acct, extraClass = "") => {
     const calc = calcFor(acct.id);
     const netTotal = calc.totals.netCashflow;
     const openingDate = calc.weeks[0]?.week?.start;
     const closingDate = calc.weeks[calc.weeks.length - 1]?.week?.end;
     const chartId = `home-acct-${acct.id}`;
-    const weeklyClosingForCard = calc.weeks.map((w) => w.closing);
-    const cardDistAnnotations = calc.weeks
-      .map((w, i) => ({ wi: i, amount: distributionForWeek(acct.id, w), label: "Distribution" }))
-      .filter((a) => a.amount);
-    const chart = urvSparklineSVG(weeklyClosingForCard, weeksMetaForChart, chartId, { W: 280, H: 50, padX: 2, padY: 6, fromZero: false, compact: true, annotations: cardDistAnnotations });
 
+    // full 13 weeks (independent of the 6/13 toggle) for the detail modal and the week-end balances
     const fullWeeks = calcFullFor(acct.id);
+    const ladder = weekEndLadder(fullWeeks, today);
     cardCharts.push({
-      chartId, points: chart.points, W: chart.W, accountId: acct.id,
+      chartId, accountId: acct.id,
       modalTitle: `${acct.name} — Cash Movement`,
       weeksMetaFull: weeksMetaFullHome.slice(0, fullWeeks.length),
       weeklyOpeningFull: fullWeeks.map((w) => w.opening),
@@ -1218,11 +1338,17 @@ export function renderHome(store) {
         ${acct.isMain ? `<div class="main-account-badge">★ MAIN OPERATING ACCOUNT</div>` : ""}
         <div class="account-card-name">${escapeHtml(acct.name)}</div>
         <div class="account-card-figures-row">
-          <div class="acf-item"><div class="label">Opening<span class="as-of-date">${openingDate ? fmtDateShort(openingDate) : ""}</span></div><div class="value">${fmtMoney(calc.totals.opening)}</div></div>
+          <div class="acf-item"><div class="label">Opening</div><div class="value">${fmtMoney(calc.totals.opening)}</div>${dateChip(openingDate, "As of")}</div>
           <div class="acf-item"><div class="label">Net Change</div><div class="value ${netTotal >= 0 ? "green" : "red"}">${fmtMoney(netTotal, { signed: true })}</div></div>
-          <div class="acf-item"><div class="label">Closing<span class="as-of-date">${closingDate ? fmtDateShort(closingDate) : ""}</span></div><div class="value brass">${fmtMoney(calc.totals.closing)}</div></div>
+          <div class="acf-item"><div class="label">Closing</div><div class="value brass">${fmtMoney(calc.totals.closing)}</div>${dateChip(closingDate, "As of")}</div>
         </div>
-        <div class="account-card-chart">${chart.html}</div>
+        <div class="acct-ladder">
+          ${ladderTile("ladder-prior", "Prior Week Ended", ladder.prior)}
+          <div class="ladder-arrow">›</div>
+          ${ladderTile("ladder-last", "Last Week Ended", ladder.last)}
+          <div class="ladder-arrow">›</div>
+          ${ladderTile("ladder-ahead", "Week Ahead", ladder.ahead, "Expected")}
+        </div>
         <div class="account-card-actions">
           <button type="button" class="acct-action-btn acct-action-forecast" data-account="${acct.id}">
             <span class="acct-action-icon">→</span><span>Go To Forecast</span>
@@ -1255,7 +1381,6 @@ export function renderHome(store) {
     });
   });
   for (const c of cardCharts) {
-    wireUrvChartHover(accountsHost, c.chartId, c.points, c.W, { compact: true });
     const btn = accountsHost.querySelector(`.acct-action-detail[data-chart-id="${c.chartId}"]`);
     btn?.addEventListener("click", () => {
       openCashMovementModal(c.modalTitle, c.weeksMetaFull, c.weeklyOpeningFull, c.weeklyNetFull, c.weeklyClosingFull, c.weeklyDistributionFull);
