@@ -5,6 +5,7 @@ import {
   effectivePayableDate, rollForwardPeriod, KIND_MAP, WEEKS_PER_PERIOD, recordTombstone, interestForAccount,
   UNBILLED_REVENUE_SECTIONS, makeUnbilledRevenueItem, unbilledRevenueItemTotal, blankInvoice, unbilledRevenueOccurrencesInPeriod, recordPwpMemory, weekEndLadder,
   ACCOUNTS, accountName, computeForecastForAccount, computeSimpleAccountForecast,
+  addMonthsYM, unbilledStartMonth, unbilledMonthSlots, unbilledUpdatePending, unbilledUpdateSummary, applyUnbilledUpdate202611, unbilledBackupCsv,
 } from "./state.js";
 import { parseAgingReport, parseAgingWorkbook, parseRevenueForecastReport, parseRevenueForecastWorkbook } from "./parser.js";
 
@@ -2324,6 +2325,8 @@ export function renderUnbilled(store) {
   // page per request — it wasn't being used. Its underlying data
   // (state.unbilledReceivables) and its contribution to Receivables Collected
   // on CF Forecast are untouched; only this page's UI for it is gone.
+  renderUnbilledMonthsControl(store);
+  renderUnbilledUpdateBanner(store);
   renderUnbilledRevenueSections(store, period);
 }
 
@@ -2340,6 +2343,123 @@ function urvInvoiceCell(item, idx) {
     <div class="urv-inv-row"><input class="mini-input urv-days-input" data-id="${id}" data-idx="${idx}" type="text" placeholder="days" value="${days}" title="Days after the invoice date — sets the CF date automatically" /><span class="urv-inv-label">d → CF</span></div>
     <div class="urv-inv-row"><span class="urv-inv-label">CF:</span> <span class="urv-date-edit urv-cfdate-edit ${!inv.cfDate ? "urv-cf-unset" : ""}" data-id="${id}" data-idx="${idx}" title="Click to pick the CF date directly">${inv.cfDate ? fmtDate(inv.cfDate) : "— assign —"}</span></div>
   </td>`;
+}
+
+const MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+// "2026-11" -> "NOV". Adds the year ("JAN ’27") when it differs from the first column's, so Nov/Dec/Jan isn't ambiguous.
+function urvMonthLabel(ym, firstYm) {
+  const [y, m] = ym.split("-").map(Number);
+  return y === Number(firstYm.slice(0, 4)) ? MONTH_ABBR[m - 1] : `${MONTH_ABBR[m - 1]} ’${String(y).slice(2)}`;
+}
+// A start month as the range it covers: "Nov 2026 – Jan 2027"
+function urvRangeLabel(startYm) {
+  const f = (ym) => { const [y, m] = ym.split("-").map(Number); return `${MONTH_ABBR[m - 1][0]}${MONTH_ABBR[m - 1].slice(1).toLowerCase()} ${y}`; };
+  return `${f(startYm)} – ${f(addMonthsYM(startYm, 2))}`;
+}
+// Start-month choices: a window around today, always including the value currently in use
+function urvMonthOptionsHtml(selectedYm) {
+  const base = todayISO().slice(0, 7);
+  const set = new Set(selectedYm ? [selectedYm] : []);
+  for (let n = -6; n <= 12; n++) set.add(addMonthsYM(base, n));
+  return [...set].sort().map((ym) => `<option value="${ym}" ${ym === selectedYm ? "selected" : ""}>${urvRangeLabel(ym)}</option>`).join("");
+}
+
+// One control at the top that sets the month columns for every section at once
+function renderUnbilledMonthsControl(store) {
+  const host = document.getElementById("urv-months-all-wrap");
+  if (!host) return;
+  const starts = new Set(UNBILLED_REVENUE_SECTIONS.map((sec) => unbilledStartMonth(store.state, sec.id)));
+  const uniform = starts.size === 1 ? [...starts][0] : "";
+  host.innerHTML = `
+    <label class="urv-months-label" for="urv-months-all">Months shown</label>
+    <select class="mini-select" id="urv-months-all" ${store.canEdit ? "" : "disabled"} title="Set the three month columns for every section at once. Relabels the columns only — amounts already entered don't move.">
+      ${uniform ? "" : `<option value="" selected>Sections differ — set all to…</option>`}
+      ${urvMonthOptionsHtml(uniform || null)}
+    </select>`;
+  host.querySelector("#urv-months-all").addEventListener("change", (e) => {
+    const ym = e.target.value;
+    if (!ym) return;
+    store.mutate((s) => {
+      s.unbilledRevenueMonths = { ...(s.unbilledRevenueMonths || {}) };
+      for (const sec of UNBILLED_REVENUE_SECTIONS) s.unbilledRevenueMonths[sec.id] = ym;
+    });
+    toast(`All sections now show ${urvRangeLabel(ym)}`, "success");
+  });
+}
+
+// A banner offering the pending update — editors only, and only until it has been applied.
+function renderUnbilledUpdateBanner(store) {
+  const host = document.getElementById("urv-update-banner");
+  if (!host) return;
+  if (!store.canEdit || !unbilledUpdatePending(store.state)) { host.innerHTML = ""; return; }
+  const s = unbilledUpdateSummary(store.state);
+  host.innerHTML = `
+    <div class="urv-update-banner">
+      <div class="uub-icon">⬆</div>
+      <div class="uub-text"><b>November 2026 update ready.</b> Replaces the Fixed Price Rolling Revenue Forecast (${s.fixedPrice.newCount} projects, Nov–Jan) and WIP (${s.wip.newCount} projects, ending October balances). Nothing else is touched.</div>
+      <button type="button" class="btn-primary uub-btn" id="urv-update-review">Review &amp; apply</button>
+    </div>`;
+  host.querySelector("#urv-update-review").onclick = () => openUnbilledUpdateModal(store);
+}
+
+function downloadTextFile(filename, text, mime) {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function openUnbilledUpdateModal(store) {
+  const s = unbilledUpdateSummary(store.state);
+  const m = (n) => fmtMoney(n, { cents: true });
+  const monthName = (ym) => MONTH_ABBR[Number(ym.slice(5)) - 1];
+  openModal(`
+    <button type="button" class="modal-close-x" id="uum-close">✕</button>
+    <h3>November 2026 Unbilled AR update</h3>
+    <div class="uum-body">
+      <div class="uum-block">
+        <div class="uum-title">Fixed Price Rolling Revenue Forecast</div>
+        <div class="uum-row"><span>Now</span><span>${s.fixedPrice.oldCount} items · ${m(s.fixedPrice.oldTotal)}</span></div>
+        <div class="uum-row uum-after"><span>After</span><span>${s.fixedPrice.newCount} projects · one total per project</span></div>
+        <div class="uum-row"><span>${monthName(s.months[0])} / ${monthName(s.months[1])} / ${monthName(s.months[2])}</span><span>${m(s.fixedPrice.monthTotals[0])} / ${m(s.fixedPrice.monthTotals[1])} / ${m(s.fixedPrice.monthTotals[2])}</span></div>
+        <div class="uum-row"><span>Total</span><span>${m(s.fixedPrice.newTotal)}</span></div>
+      </div>
+      <div class="uum-block">
+        <div class="uum-title">WIP</div>
+        <div class="uum-row"><span>Now</span><span>${s.wip.oldCount} items · ${m(s.wip.oldTotal)}</span></div>
+        <div class="uum-row uum-after"><span>After</span><span>${s.wip.newCount} projects · ending October balance</span></div>
+        <div class="uum-row"><span>Total</span><span>${m(s.wip.newTotal)}</span></div>
+      </div>
+      <ul class="uum-notes">
+        <li>These two sections' columns switch to <b>${s.months.map((ym, i, a) => urvMonthLabel(ym, a[0])).join(" · ")}</b>. The other sections keep their current months.</li>
+        <li><b>Not touched:</b> T&amp;M, Frontlog, Small Quick Jobs, Other, and everything else in your forecast — AR, AP, payroll &amp; fixed payments, transfers, periods.</li>
+        <li><b>Replaced:</b> every current line item in those two sections, including any CF dates already assigned to them. The new items start with no CF dates, so nothing new flows into Receivables Collected until you assign them.</li>
+      </ul>
+      <label class="uum-backup"><input type="checkbox" id="uum-backup" checked /> Download a backup (CSV) of the items being replaced</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="uum-cancel">Cancel</button>
+      <button class="btn-primary" id="uum-apply" style="width:auto;">Apply update</button>
+    </div>
+  `, {
+    onMount: (host) => {
+      host.querySelector("#uum-close").onclick = closeModal;
+      host.querySelector("#uum-cancel").onclick = closeModal;
+      host.querySelector("#uum-apply").onclick = () => {
+        if (host.querySelector("#uum-backup").checked) {
+          try { downloadTextFile(`unbilled-ar-backup-${todayISO()}.csv`, "\uFEFF" + unbilledBackupCsv(store.state), "text/csv"); }
+          catch { /* a blocked download must never stop the update itself */ }
+        }
+        let result = null;
+        store.mutate((st) => { result = applyUnbilledUpdate202611(st, store.initials()); });
+        closeModal();
+        if (result) toast(`Unbilled AR updated — ${result.added} items added, ${result.removed} replaced`, "success");
+      };
+    },
+  });
 }
 
 function renderUnbilledRevenueSections(store, period) {
@@ -2394,13 +2514,16 @@ function renderUnbilledRevenueSections(store, period) {
       <div class="panel urv-section">
         <div class="fixed-group-head urv-section-head" data-section="${sec.id}">
           <h3><button type="button" class="urv-collapse-btn" data-section="${sec.id}" title="${isCollapsed ? "Expand" : "Collapse"}">${isCollapsed ? "▸" : "▾"}</button>${escapeHtml(sec.label)} <span class="count">${items.length} item${items.length === 1 ? "" : "s"}</span></h3>
-          <span class="total">${fmtMoney(sectionTotal)}</span>
+          <div class="urv-head-right">
+            <select class="mini-select urv-months-select" data-section="${sec.id}" ${store.canEdit ? "" : "disabled"} title="Which 3 months this section's invoice columns cover (relabels the columns only — amounts already entered don't move)">${urvMonthOptionsHtml(unbilledStartMonth(state, sec.id))}</select>
+            <span class="total">${fmtMoney(sectionTotal)}</span>
+          </div>
         </div>
         ${isCollapsed ? "" : `
         <div class="table-scroll">
           <table class="data-table urv-table">
             <thead>
-              <tr><th></th><th class="urv-month-label">OCT</th><th class="urv-month-label">NOV</th><th class="urv-month-label">DEC</th><th></th><th></th></tr>
+              <tr><th></th>${unbilledMonthSlots(state, sec.id).map((ym, _i, slots) => `<th class="urv-month-label">${urvMonthLabel(ym, slots[0])}</th>`).join("")}<th></th><th></th></tr>
               <tr><th>Name</th><th>Invoice 1</th><th>Invoice 2</th><th>Invoice 3</th><th class="num">Total</th><th></th></tr>
             </thead>
             <tbody>${rows || `<tr><td colspan="6" class="meta" style="padding:14px;">No line items yet.</td></tr>`}</tbody>
@@ -2418,6 +2541,13 @@ function renderUnbilledRevenueSections(store, period) {
       if (urvCollapsedSections.has(secId)) urvCollapsedSections.delete(secId);
       else urvCollapsedSections.add(secId);
       renderUnbilledRevenueSections(store, period);
+    });
+  });
+
+  host.querySelectorAll(".urv-months-select").forEach((sel) => {
+    sel.addEventListener("click", (e) => e.stopPropagation());
+    sel.addEventListener("change", () => {
+      store.mutate((s) => { s.unbilledRevenueMonths = { ...(s.unbilledRevenueMonths || {}), [sel.dataset.section]: sel.value }; });
     });
   });
 
