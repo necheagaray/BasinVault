@@ -1709,14 +1709,42 @@ table.cf-grid tbody tr:hover .cell-detail-btn{ opacity:0.65; }
 
 .modal:has(.uum-body){ width:560px; max-width:94vw; }
 .uum-body{ display:flex; flex-direction:column; gap:12px; margin-top:6px; }
-.uum-block{ border:1px solid var(--line-bright); border-radius:9px; padding:10px 14px 11px; background:rgba(255,255,255,0.02); }
-.uum-title{ font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:0.09em; text-transform:uppercase; color:var(--brass-bright); margin-bottom:6px; }
-.uum-row{ display:flex; justify-content:space-between; gap:14px; font-size:12.5px; padding:3px 0; color:var(--text-mid); }
-.uum-row span:last-child{ font-family:var(--font-mono); color:var(--text-hi); text-align:right; }
-.uum-after span:last-child{ color:var(--green); }
 .uum-notes{ margin:2px 0 0; padding-left:18px; font-size:12.5px; line-height:1.55; color:var(--text-mid); }
 .uum-notes li{ margin-bottom:5px; }
 .uum-notes b{ color:var(--text-hi); }
 /* scoped under .modal so it beats the global `.modal label` (block, uppercase) and `.modal input` (100% wide) rules */
 .modal .uum-backup{ display:flex; align-items:center; gap:9px; margin:2px 0 0; font-size:12.5px; text-transform:none; letter-spacing:0; color:var(--text-hi); cursor:pointer; }
 .modal .uum-backup input{ width:auto; padding:0; margin:0; flex-shrink:0; accent-color:var(--brass-bright); }
+
+
+/* ================= Unbilled AR: column totals (section header + footer row) and the redesigned update dialog ================= */
+.urv-section-head{ flex-wrap:wrap; gap:10px 16px; }
+.urv-head-totals{ display:flex; align-items:stretch; }
+.urv-ht{ display:flex; flex-direction:column; align-items:flex-end; gap:1px; padding:1px 13px; border-left:1px solid var(--line-bright); }
+.urv-ht:first-child{ border-left:none; }
+.urv-ht i{ font-style:normal; font-family:var(--font-mono); font-size:9.5px; font-weight:700; letter-spacing:0.1em; color:var(--text-dim); }
+.urv-ht b{ font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--text-hi); }
+.urv-ht-sum{ padding-right:2px; }
+.urv-ht-sum b{ font-size:14px; color:var(--brass-bright); text-shadow:0 0 12px rgba(230,195,126,0.3); }
+
+/* footer row: totals line up under their invoice columns, and stay pinned to the bottom of the screen while a long section scrolls past */
+table.urv-table tfoot td{
+  position:sticky; bottom:0; z-index:7; padding:11px 10px; border-top:2px solid var(--brass-dim);
+  background:linear-gradient(180deg, var(--bg-raised), var(--bg-panel-alt));
+  font-family:var(--font-mono); font-size:13px; font-weight:800; color:var(--text-hi); white-space:nowrap;
+  box-shadow:0 -8px 16px -6px rgba(0,0,0,0.6);
+}
+/* the label may wrap: it names the section while the section header is scrolled out of view, but must not widen the name column */
+table.urv-table tfoot td:first-child{ padding-left:12px; font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--brass-bright); white-space:normal; line-height:1.35; }
+table.urv-table tfoot td.urv-tot-sum{ text-align:right; color:var(--brass-bright); }
+
+.uum-sec{ border:1px solid var(--line-bright); border-radius:9px; padding:9px 14px 10px; background:rgba(255,255,255,0.02); }
+.uum-sec-head{ display:flex; justify-content:space-between; gap:12px; font-family:var(--font-mono); font-size:12px; }
+.uum-sec-head span:first-child{ font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--brass-bright); }
+.uum-sec-head span:last-child{ color:var(--text-mid); white-space:nowrap; }
+.uum-sec-amts{ display:flex; flex-wrap:wrap; gap:4px 18px; margin-top:6px; font-family:var(--font-mono); font-size:12.5px; color:var(--text-hi); }
+.uum-sec-amts i{ font-style:normal; font-size:9.5px; font-weight:700; letter-spacing:0.1em; color:var(--text-dim); margin-right:6px; }
+.uum-sec-total{ margin-left:auto; color:var(--green); }
+.uum-warn{ padding:10px 13px; border-radius:9px; font-size:12.5px; line-height:1.55; color:var(--text-mid); border:1px solid rgba(230,195,126,0.55); background:rgba(230,195,126,0.08); }
+.uum-warn b{ color:var(--brass-bright); }
+.uum-note-ok{ padding:9px 13px; border-radius:9px; font-size:12.5px; line-height:1.5; color:var(--text-mid); border:1px solid rgba(79,214,148,0.4); background:rgba(79,214,148,0.07); }
